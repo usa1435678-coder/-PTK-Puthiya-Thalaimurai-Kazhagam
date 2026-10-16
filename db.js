@@ -269,14 +269,17 @@ async function initDatabase() {
   }
 
   const existingAdmin = await getRow('SELECT id, password_hash FROM users WHERE username = ?', ['admin']);
-  if (!existingAdmin || bcrypt.compareSync('admin123', existingAdmin.password_hash)) {
-    if (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length < 16) {
-      throw new Error('ADMIN_PASSWORD must be at least 16 characters long.');
-    }
-    const password = process.env.ADMIN_PASSWORD || crypto.randomBytes(24).toString('base64url');
+  const configuredAdminPassword = process.env.ADMIN_PASSWORD;
+  if (configuredAdminPassword && configuredAdminPassword.length < 16) {
+    throw new Error('ADMIN_PASSWORD must be at least 16 characters long.');
+  }
+  if (configuredAdminPassword || !existingAdmin || bcrypt.compareSync('admin123', existingAdmin.password_hash)) {
+    const password = configuredAdminPassword || crypto.randomBytes(24).toString('base64url');
     const passwordHash = bcrypt.hashSync(password, 12);
     const credentialsPath = path.join(path.dirname(databasePath), 'admin-credentials.txt');
-    await fs.promises.writeFile(credentialsPath, `Username: admin\nPassword: ${password}\n`, { mode: 0o600 });
+    if (!configuredAdminPassword) {
+      await fs.promises.writeFile(credentialsPath, `Username: admin\nPassword: ${password}\n`, { mode: 0o600 });
+    }
     if (existingAdmin) {
       await runQuery('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existingAdmin.id]);
     } else {
