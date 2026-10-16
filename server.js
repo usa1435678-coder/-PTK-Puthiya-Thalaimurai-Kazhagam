@@ -964,6 +964,7 @@ app.get('/admin/volunteers', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const notices = {
     approved: 'Volunteer approved. An active member and card were created.',
+    rejected: 'Volunteer registration rejected.',
     deactivated: 'Volunteer member and card deactivated.',
     activated: 'Volunteer member and card reactivated.',
     edited: 'Volunteer member profile saved.',
@@ -1109,6 +1110,59 @@ app.post('/admin/volunteers/:id/approve', requireAuth, async (req, res) => {
 
   await syncMemberCsv();
   res.redirect('/admin/volunteers?saved=approved');
+});
+
+app.post('/admin/volunteers/:id/reject', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  const note = typeof req.body.note === 'string' ? req.body.note.trim() : '';
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid volunteer registration ID.');
+  if (note.length > 1000) return res.status(400).send('Volunteer notes must be 1000 characters or fewer.');
+
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    const volunteer = await getRow('SELECT id, ref, status, member_id FROM volunteers WHERE id = ?', [id]);
+    if (!volunteer) {
+      await runQuery('ROLLBACK');
+      return res.status(404).send('Volunteer registration not found.');
+    }
+    if (volunteer.member_id) {
+      await runQuery('ROLLBACK');
+      return res.status(409).send('This volunteer has an issued member card. Deactivate the member instead of rejecting the registration.');
+    }
+    if (volunteer.status !== 'rejected') {
+      await runQuery(
+        `UPDATE volunteers
+         SET status = 'rejected', review_note = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+        [note || null, id]
+      );
+      await addAuditLog(
+        'volunteer_rejected',
+        `Volunteer ${volunteer.ref} rejected${note ? `; note: ${note}` : ''}`,
+        'volunteer',
+        volunteer.ref,
+        req.session.user.username
+      );
+    } else if (note && note !== volunteer.review_note) {
+      await runQuery(
+        `UPDATE volunteers SET review_note = ?, updated_at = datetime('now') WHERE id = ?`,
+        [note, id]
+      );
+      await addAuditLog(
+        'volunteer_rejection_note_updated',
+        `Rejection note updated for volunteer ${volunteer.ref}`,
+        'volunteer',
+        volunteer.ref,
+        req.session.user.username
+      );
+    }
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    throw error;
+  }
+
+  res.redirect('/admin/volunteers?saved=rejected');
 });
 
 app.post('/admin/volunteers/:id/status', requireAuth, async (req, res) => {

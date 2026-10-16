@@ -470,6 +470,11 @@ textarea {
   background: #fbeaec;
 }
 
+.submission-status.rejected {
+  color: #9b1c27;
+  background: #fbeaec;
+}
+
 .submission-message {
   max-width: 340px;
   white-space: pre-wrap;

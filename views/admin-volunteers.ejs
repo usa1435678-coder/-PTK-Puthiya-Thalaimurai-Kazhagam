@@ -100,9 +100,12 @@
                             <textarea id="volunteer-note-<%= vol.id %>" name="note" maxlength="1000" placeholder="Admin note (optional)"><%= vol.review_note || '' %></textarea>
                             <button class="btn btn-primary" type="submit" <%= profileReady ? '' : 'disabled' %>>Approve &amp; issue card</button>
                             <% if (!profileReady) { %><small>Complete and save the member details before approval.</small><% } %>
+                            <% if (vol.status !== 'rejected') { %>
+                              <button class="btn btn-secondary" type="submit" formaction="/admin/volunteers/<%= vol.id %>/reject">Reject registration</button>
+                            <% } %>
                           </form>
                         <% } else { %>
-                          <a class="btn btn-secondary" href="/admin/card/<%= encodeURIComponent(vol.member_code) %>">Card</a>
+                          <a class="btn btn-secondary" href="/admin/card/<%= encodeURIComponent(vol.member_code) %>">அட்டை / Card</a>
                           <form class="submission-actions" method="POST" action="/admin/volunteers/<%= vol.id %>/status">
                             <input type="hidden" name="status" value="<%= vol.member_status === 'active' ? 'inactive' : 'active' %>" />
                             <label class="sr-only" for="volunteer-status-note-<%= vol.id %>">Status note</label>
