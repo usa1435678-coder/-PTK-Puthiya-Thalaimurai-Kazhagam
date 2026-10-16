@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contact Requests | PTK</title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container topbar">
+        <div class="brand">
+          <div class="brand-mark">PTK</div>
+          <div>
+            <div><%= settings.party_name_tamil %></div>
+            <small><%= settings.party_name_english %></small>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/logout">Logout</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <div class="container" style="max-width: 1060px;">
+        <div class="section-header">
+          <div class="eyebrow">Contact Requests</div>
+          <h2>Public contact form submissions</h2>
+        </div>
+        <% if (typeof notice !== 'undefined' && notice) { %><div class="notice success"><%= notice %></div><% } %>
+
+        <div class="dashboard-panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Subject</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!contacts.length) { %>
+                  <tr><td colspan="8" class="empty-state">No contact requests have been submitted yet.</td></tr>
+                <% } %>
+                <% contacts.forEach((contact) => { %>
+                  <tr>
+                    <td><%= contact.ref %></td>
+                    <td><%= contact.full_name %></td>
+                    <td><% if (contact.email) { %><a href="mailto:<%= contact.email %>"><%= contact.email %></a><% } else { %>N/A<% } %></td>
+                    <td><%= contact.phone || 'N/A' %></td>
+                    <td>
+                      <strong><%= contact.subject %></strong>
+                      <% if (contact.message) { %><details><summary>View message</summary><p class="submission-message"><%= contact.message %></p></details><% } %>
+                    </td>
+                    <td><span class="submission-status <%= contact.status %>"><%= contact.status.replace('_', ' ') %></span></td>
+                    <td><%= formatDate(contact.created_at) %></td>
+                    <td>
+                      <form class="submission-actions" method="POST" action="/admin/contacts/<%= contact.id %>/status">
+                        <label class="sr-only" for="contact-status-<%= contact.id %>">Contact request status</label>
+                        <select id="contact-status-<%= contact.id %>" name="status">
+                          <option value="new" <%= contact.status === 'new' ? 'selected' : '' %>>New</option>
+                          <option value="in_progress" <%= contact.status === 'in_progress' ? 'selected' : '' %>>In progress</option>
+                          <option value="resolved" <%= contact.status === 'resolved' ? 'selected' : '' %>>Resolved</option>
+                        </select>
+                        <button class="btn btn-primary" type="submit">Update status</button>
+                      </form>
+                      <form class="submission-delete" method="POST" action="/admin/contacts/<%= contact.id %>/delete" onsubmit="return confirm(document.body.dataset.language === 'ta' ? 'இந்த தொடர்பு கோரிக்கையை நிரந்தரமாக நீக்கவா?' : 'Permanently delete this contact request?')">
+                        <button class="btn btn-secondary" type="submit">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

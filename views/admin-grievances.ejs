@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grievances | PTK</title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container topbar">
+        <div class="brand">
+          <div class="brand-mark">PTK</div>
+          <div>
+            <div><%= settings.party_name_tamil %></div>
+            <small><%= settings.party_name_english %></small>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/logout">Logout</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <div class="container" style="max-width: 1060px;">
+        <div class="section-header">
+          <div class="eyebrow">Grievances</div>
+          <h2>Public grievance submissions</h2>
+        </div>
+        <% if (typeof notice !== 'undefined' && notice) { %><div class="notice success"><%= notice %></div><% } %>
+
+        <div class="dashboard-panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>District</th>
+                  <th>Subject</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!grievances.length) { %>
+                  <tr><td colspan="8" class="empty-state">No grievances have been submitted yet.</td></tr>
+                <% } %>
+                <% grievances.forEach((grv) => { %>
+                  <tr>
+                    <td><%= grv.ref %></td>
+                    <td><%= grv.full_name %></td>
+                    <td><%= grv.phone %></td>
+                    <td><%= grv.district || 'N/A' %></td>
+                    <td>
+                      <strong><%= grv.subject %></strong>
+                      <% if (grv.message) { %><details><summary>View grievance</summary><p class="submission-message"><%= grv.message %></p></details><% } %>
+                    </td>
+                    <td><span class="submission-status <%= grv.status %>"><%= grv.status.replace('_', ' ') %></span></td>
+                    <td><%= formatDate(grv.created_at) %></td>
+                    <td>
+                      <form class="submission-actions" method="POST" action="/admin/grievances/<%= grv.id %>/status">
+                        <label class="sr-only" for="grievance-status-<%= grv.id %>">Grievance status</label>
+                        <select id="grievance-status-<%= grv.id %>" name="status">
+                          <option value="new" <%= grv.status === 'new' ? 'selected' : '' %>>New</option>
+                          <option value="in_progress" <%= grv.status === 'in_progress' ? 'selected' : '' %>>In progress</option>
+                          <option value="resolved" <%= grv.status === 'resolved' ? 'selected' : '' %>>Resolved</option>
+                        </select>
+                        <button class="btn btn-primary" type="submit">Update status</button>
+                      </form>
+                      <form class="submission-delete" method="POST" action="/admin/grievances/<%= grv.id %>/delete" onsubmit="return confirm(document.body.dataset.language === 'ta' ? 'இந்த குறையை நிரந்தரமாக நீக்கவா?' : 'Permanently delete this grievance?')">
+                        <button class="btn btn-secondary" type="submit">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

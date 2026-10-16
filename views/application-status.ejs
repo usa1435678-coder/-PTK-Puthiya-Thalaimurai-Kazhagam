@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Application status | <%= settings.party_name_english || 'PTK' %></title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container topbar">
+        <div class="brand">
+          <div class="brand-mark">PTK</div>
+          <div>
+            <div><%= settings.party_name_tamil %></div>
+            <small><%= settings.party_name_english %></small>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/">Home</a>
+          <a href="/membership">Membership</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <div class="container" style="max-width: 720px;">
+        <div class="section-header">
+          <div class="eyebrow">Membership</div>
+          <h2>Application status</h2>
+          <p>Enter the application reference shown after you applied, or your member ID, and the phone number used in the application. Spaces and phone formatting such as +91, dashes, and parentheses are accepted.</p>
+        </div>
+
+        <div class="form-shell">
+          <form method="POST" action="/application-status">
+            <label for="application-ref">Application reference or member ID</label>
+            <input id="application-ref" name="application_ref" value="<%= reference || '' %>" autocomplete="off" required />
+            <label for="application-phone">Phone number used in the application</label>
+            <input id="application-phone" name="phone" type="tel" value="<%= phone || '' %>" autocomplete="tel" required />
+            <button class="btn btn-primary" type="submit" style="margin-top: 16px;">Check status</button>
+          </form>
+        </div>
+
+        <% if (error) { %>
+          <div class="notice error" role="alert"><%= error %></div>
+        <% } %>
+
+        <% if (application) { %>
+          <section class="dashboard-panel" style="margin-top: 24px;">
+            <h3>Application details</h3>
+            <p><strong>Reference:</strong> <%= application.application_ref %></p>
+            <% if (application.member_id) { %><p><strong>Member ID:</strong> <%= application.member_id %></p><% } %>
+            <p><strong>Applicant:</strong> <%= application.full_name %></p>
+            <p><strong>Membership category:</strong> <%= application.membership_category %></p>
+            <p><strong>Submitted:</strong> <%= formatDate(application.created_at) %></p>
+            <p><strong>Status:</strong> <span class="application-status-value <%= application.status %>"><%= application.status %></span></p>
+            <% if (application.status === 'pending') { %>
+              <p>Your application is awaiting review.</p>
+            <% } else if (application.status === 'approved') { %>
+              <p>Your application has been approved.</p>
+            <% } else if (application.status === 'rejected') { %>
+              <p>Your application was not approved.</p>
+            <% } %>
+          </section>
+        <% } %>
+
+        <p style="margin-top: 20px;"><a href="/">Back to home</a></p>
+      </div>
+    </main>
+  </body>
+</html>

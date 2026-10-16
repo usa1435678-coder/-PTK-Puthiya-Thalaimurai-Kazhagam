@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>System settings | PTK</title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container topbar">
+        <div class="brand">
+          <div class="brand-mark">PTK</div>
+          <div>
+            <div><%= settings.party_name_tamil %></div>
+            <small><%= settings.party_name_english %></small>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/settings">System settings</a>
+          <a href="/admin/logout">Logout</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <div class="container" style="max-width: 960px;">
+        <div class="section-header">
+          <div class="eyebrow">System settings</div>
+          <h2>Security, backups, and application controls</h2>
+        </div>
+
+        <div class="dashboard-panel">
+          <h3>Administrator PIN</h3>
+          <p>This PIN protects admin pages in this browser only. It is not server-side authentication and does not replace your administrator username and password.</p>
+          <form id="admin-pin-form">
+            <div id="admin-pin-current-field" style="margin-bottom: 14px;" hidden>
+              <label for="admin-pin-current">Current PIN</label>
+              <input id="admin-pin-current" name="current_pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="current-password" />
+            </div>
+            <div style="margin-bottom: 14px;">
+              <label for="admin-pin-new">New PIN</label>
+              <input id="admin-pin-new" name="new_pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="new-password" required />
+            </div>
+            <div style="margin-bottom: 14px;">
+              <label for="admin-pin-confirm">Confirm new PIN</label>
+              <input id="admin-pin-confirm" name="confirm_pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="new-password" required />
+            </div>
+            <button class="btn btn-primary" type="submit">Change PIN</button>
+            <p id="admin-pin-message" role="status" aria-live="polite" style="margin-top: 12px;"></p>
+          </form>
+          <p>If you forget this browser-only PIN, clear this site's browser storage to reset it. You will still need your administrator login.</p>
+        </div>
+
+        <div class="dashboard-panel">
+          <h3>Export database backup</h3>
+          <p>Download a complete JSON backup of all platform data. This file can be used to restore data later.</p>
+          <a class="btn btn-primary" href="/admin/backup">Download backup</a>
+        </div>
+
+        <div class="dashboard-panel" style="margin-top: 24px;">
+          <h3>Restore from backup</h3>
+          <p>Upload a previously exported backup file. This will replace existing records with data from the backup.</p>
+          <form method="POST" action="/admin/restore">
+            <div style="margin-bottom: 16px;">
+              <label>Paste JSON backup content</label>
+              <textarea name="backup_json" style="min-height: 200px; font-family: monospace;"></textarea>
+            </div>
+            <div>
+              <button class="btn btn-primary" type="submit" onclick="return confirm(window.ptkTranslate('This will replace existing data. Continue?'))">Restore from backup</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="dashboard-panel" style="margin-top: 24px;">
+          <h3>Backup information</h3>
+          <ul>
+            <li>Backups include all settings, members, applications, announcements, events, and audit logs</li>
+            <li>Admin user accounts are NOT included in backups for security</li>
+            <li>Restore will clear existing data for each table and load from backup</li>
+            <li>Keep backups in a secure location</li>
+            <li>Test restore on a copy of your data first</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

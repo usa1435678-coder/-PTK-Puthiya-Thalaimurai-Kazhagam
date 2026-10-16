@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Volunteers | PTK</title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container topbar">
+        <div class="brand">
+          <div class="brand-mark">PTK</div>
+          <div>
+            <div><%= settings.party_name_tamil %></div>
+            <small><%= settings.party_name_english %></small>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/logout">Logout</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <div class="container" style="max-width: 1060px;">
+        <div class="section-header">
+          <div class="eyebrow">Volunteers</div>
+          <h2>Volunteer registration submissions</h2>
+        </div>
+        <% if (typeof notice !== 'undefined' && notice) { %><div class="notice success"><%= notice %></div><% } %>
+
+        <div class="dashboard-panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Volunteer</th>
+                  <th>Contact</th>
+                  <th>District / Interest</th>
+                  <th>Status</th>
+                  <th>Member / Card</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!volunteers.length) { %>
+                  <tr><td colspan="8" class="empty-state">No volunteer registrations have been submitted yet.</td></tr>
+                <% } %>
+                <% volunteers.forEach((vol) => { %>
+                  <tr>
+                    <td><%= vol.ref %></td>
+                    <td>
+                      <strong><%= vol.full_name %></strong>
+                      <% if (vol.tamil_name) { %><br /><%= vol.tamil_name %><% } %>
+                      <% if (vol.message) { %><details><summary>Volunteer message</summary><p class="submission-message"><%= vol.message %></p></details><% } %>
+                      <% if (vol.availability) { %><span class="meta">Availability: <%= vol.availability %></span><% } %>
+                      <% if (vol.review_note) { %><details><summary>Admin note</summary><p class="submission-message"><%= vol.review_note %></p></details><% } %>
+                    </td>
+                    <td><a href="tel:<%= vol.phone %>"><%= vol.phone %></a><% if (vol.email) { %><br /><a href="mailto:<%= vol.email %>"><%= vol.email %></a><% } %></td>
+                    <td><%= vol.district || 'N/A' %><br /><strong><%= vol.interest %></strong></td>
+                    <td><span class="submission-status <%= vol.status %>"><%= vol.status %></span></td>
+                    <td>
+                      <% if (vol.member_code) { %>
+                        <strong><%= vol.member_code %></strong><br />
+                        <span class="submission-status <%= vol.member_status %>"><%= vol.member_status %></span>
+                        <% if (vol.card_status === 'active') { %><span class="submission-status resolved">Card active</span><% } else { %><span class="submission-status inactive">Card inactive</span><% } %>
+                      <% } else { %>Not issued<% } %>
+                    </td>
+                    <td><%= formatDate(vol.created_at) %></td>
+                    <td>
+                      <div class="volunteer-actions">
+                        <details class="volunteer-edit">
+                          <summary>Edit member details</summary>
+                          <form class="volunteer-profile-form" method="POST" action="/admin/volunteers/<%= vol.id %>/profile" enctype="multipart/form-data">
+                            <label>Full name<input name="full_name" value="<%= vol.full_name %>" required /></label>
+                            <label>Tamil name<input name="tamil_name" value="<%= vol.tamil_name || '' %>" /></label>
+                            <label>Phone<input name="phone" value="<%= vol.phone %>" required /></label>
+                            <label>Email<input name="email" type="email" value="<%= vol.email || '' %>" /></label>
+                            <label>District<input name="district" value="<%= vol.district || '' %>" required /></label>
+                            <label>Local unit<input name="local_unit" value="<%= vol.local_unit || '' %>" required /></label>
+                            <label>Category<input name="membership_category" value="<%= vol.membership_category || '' %>" required /></label>
+                            <label>Full address — required<textarea name="address" required><%= vol.address || '' %></textarea></label>
+                            <label>Member photo (JPG/PNG/WEBP, max 5 MB)
+                              <% if (vol.photo_url) { %><img class="asset-preview" src="<%= vol.photo_url %>" alt="Current member photo" /><% } %>
+                              <input type="file" name="member_photo" accept="image/jpeg,image/png,image/webp" />
+                            </label>
+                            <label>Admin note<textarea name="review_note" maxlength="1000"><%= vol.review_note || '' %></textarea></label>
+                            <button class="btn btn-primary" type="submit">Save changes</button>
+                          </form>
+                        </details>
+                        <% const profileReady = !!(vol.full_name && vol.phone && vol.district && vol.local_unit && vol.membership_category && vol.address); %>
+                        <% if (!vol.member_id) { %>
+                          <form class="submission-actions" method="POST" action="/admin/volunteers/<%= vol.id %>/approve">
+                            <label class="sr-only" for="volunteer-note-<%= vol.id %>">Approval note</label>
+                            <textarea id="volunteer-note-<%= vol.id %>" name="note" maxlength="1000" placeholder="Admin note (optional)"><%= vol.review_note || '' %></textarea>
+                            <button class="btn btn-primary" type="submit" <%= profileReady ? '' : 'disabled' %>>Approve &amp; issue card</button>
+                            <% if (!profileReady) { %><small>Complete and save the member details before approval.</small><% } %>
+                          </form>
+                        <% } else { %>
+                          <a class="btn btn-secondary" href="/admin/card/<%= encodeURIComponent(vol.member_code) %>">Card</a>
+                          <form class="submission-actions" method="POST" action="/admin/volunteers/<%= vol.id %>/status">
+                            <input type="hidden" name="status" value="<%= vol.member_status === 'active' ? 'inactive' : 'active' %>" />
+                            <label class="sr-only" for="volunteer-status-note-<%= vol.id %>">Status note</label>
+                            <textarea id="volunteer-status-note-<%= vol.id %>" name="note" maxlength="1000" placeholder="Admin note (optional)"><%= vol.review_note || '' %></textarea>
+                            <button class="btn <%= vol.member_status === 'active' ? 'btn-secondary' : 'btn-primary' %>" type="submit"><%= vol.member_status === 'active' ? 'Deactivate' : 'Reactivate' %></button>
+                          </form>
+                        <% } %>
+                      <form class="submission-delete" method="POST" action="/admin/volunteers/<%= vol.id %>/delete" onsubmit="return confirm(document.body.dataset.language === 'ta' ? 'இந்த தன்னார்வலர் பதிவை நிரந்தரமாக நீக்கவா?' : 'Permanently delete this volunteer registration?')">
+                        <button class="btn btn-secondary" type="submit">Delete</button>
+                      </form>
+                      </div>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

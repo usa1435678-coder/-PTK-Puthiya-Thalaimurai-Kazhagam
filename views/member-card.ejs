@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Membership Card | <%= member.full_name %></title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+    <style>
+      :root {
+        --card-red: <%= settings.card_red || '#A8202B' %>;
+        --card-yellow: <%= settings.card_yellow || '#F2C744' %>;
+        --card-green: <%= settings.card_green || '#16734B' %>;
+      }
+      .card-page-actions { display: flex; gap: 12px; margin: 18px auto; max-width: 85.6mm; }
+      @media print {
+        body { padding: 0 !important; background: white !important; }
+        .card-page-actions { display: none !important; }
+      }
+    </style>
+  </head>
+  <body style="padding: 32px; background: #f6f6f2;">
+    <div class="ptk-membership-card">
+      <% if (settings.card_background_url) { %>
+        <div class="card-art" style="background-image: url('<%= settings.card_background_url %>');"></div>
+      <% } %>
+      <div class="card-inner">
+        <div class="card-header">
+          <div class="card-brand">
+            <% if (settings.logo_url) { %>
+              <img class="card-logo" src="<%= settings.logo_url %>" alt="PTK logo" />
+            <% } else { %>
+              <div class="brand-mark" style="width: 38px; height:38px; font-size: 0.75rem;">PTK</div>
+            <% } %>
+            <div>
+              <div><%= settings.party_name_tamil || 'PTK' %></div>
+              <small><%= settings.party_name_english || 'PTK' %></small>
+            </div>
+          </div>
+          <% if (settings.flag_url) { %><img class="brand-flag" src="<%= settings.flag_url %>" alt="PTK flag" /><% } %>
+        </div>
+
+        <div class="card-body">
+          <div style="display:flex; align-items:flex-start; gap: 14px;">
+            <% if (member.photo_url) { %>
+              <img class="card-photo" src="<%= member.photo_url %>" alt="Member photo" />
+            <% } else { %>
+              <div class="card-photo-placeholder" aria-label="Member photo unavailable"><%= (member.full_name || 'PTK').trim().charAt(0).toUpperCase() %></div>
+            <% } %>
+            <div>
+              <strong style="font-size:1.05rem;"><%= member.full_name %></strong><br />
+              <span><%= member.tamil_name || 'Tamil name not provided' %></span>
+            </div>
+          </div>
+
+          <div class="card-metadata">
+            <div><span class="card-meta-label">Member ID</span><br /><strong><%= member.member_id %></strong></div>
+            <div><span class="card-meta-label">District</span><br /><strong><%= member.district %></strong></div>
+            <div><span class="card-meta-label">Unit</span><br /><strong><%= member.local_unit %></strong></div>
+            <div><span class="card-meta-label">Category</span><br /><strong><%= member.membership_category %></strong></div>
+            <div><span class="card-meta-label">Issue date</span><br /><strong><%= formatDate(card && card.issue_date) %></strong></div>
+            <div><span class="card-meta-label">Status</span><br /><strong><%= member.status === 'active' && card && card.status === 'active' ? 'Active' : 'Inactive' %></strong></div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <div class="card-authority">
+            <% if (settings.leader_photo_url) { %>
+              <img class="card-leader-photo" src="<%= settings.leader_photo_url %>" alt="PTK leader" />
+            <% } %>
+            <div class="card-authority-details">
+              <div>Authorized by PTK</div>
+              <small><%= settings.leader_name || 'PTK Leadership' %></small>
+              <% if (settings.signature_url) { %><img class="card-signature" src="<%= settings.signature_url %>" alt="Leader signature" /><% } %>
+            </div>
+          </div>
+          <div class="qr-box">
+            <img src="<%= qrUrl %>" alt="QR code" style="width: 100%; height: 100%; object-fit: cover;" />
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-page-actions">
+      <a class="btn btn-secondary" href="/admin/members">Back to members</a>
+      <% if (member.status === 'active' && card && card.status === 'active') { %>
+        <button class="btn btn-primary" type="button" onclick="window.print()">Print card</button>
+      <% } %>
+    </div>
+  </body>
+</html>

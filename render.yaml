@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: ptk-digital-platform
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: ptk-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /var/data/ptk.db
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: MEMBER_CSV_PATH
+        value: /var/data/ptk-members.csv
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        generateValue: true

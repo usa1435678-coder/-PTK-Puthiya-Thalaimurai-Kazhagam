@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Member Management | <%= settings.party_name_english || 'PTK' %></title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+    <style>
+      .member-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 18px 0; }
+      .member-search { max-width: 440px; }
+      .empty-state { padding: 28px; text-align: center; color: #666; }
+      .member-address { min-width: 220px; max-width: 360px; white-space: pre-line; }
+      .member-actions { min-width: 210px; }
+      .member-actions form { display: inline-block; margin: 2px; }
+      .member-actions .btn { padding: 0.55rem 0.75rem; font-size: 0.87rem; }
+      .member-edit { margin-top: 10px; padding: 12px; border: 1px solid #dfe4e7; border-radius: 12px; }
+      .member-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .member-status { display: inline-block; padding: 4px 9px; border-radius: 999px; background: #edf1f4; }
+      .member-status.active { color: #17663a; background: #e5f5e9; }
+      .member-status.inactive, .member-status.revoked { color: #9b1c27; background: #fbeaec; }
+      .language-picker { display: flex; gap: 8px; }
+      .language-picker button { width: auto; padding: 0.45rem 0.75rem; border: 1px solid rgba(255,255,255,.4); border-radius: 8px; color: white; background: transparent; cursor: pointer; }
+      .language-picker button[aria-pressed="true"] { color: var(--ptk-dark); background: white; }
+      body[data-language="ta"] .lang-en { display: none; }
+      body[data-language="en"] .lang-ta { display: none; }
+      .language-picker .lang-ta, .language-picker .lang-en { display: inline; }
+      .language-picker [aria-pressed="true"] .lang-ta, .language-picker [aria-pressed="true"] .lang-en { display: inline !important; }
+      @media (max-width: 700px) { .member-edit-grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body data-language="en">
+    <header class="site-header">
+      <div class="container topbar">
+        <div class="brand">
+          <div class="brand-mark">PTK</div>
+          <div>
+            <div><%= settings.party_name_tamil %></div>
+            <small><%= settings.party_name_english %></small>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard"><span class="lang-en">Dashboard</span><span class="lang-ta">நிர்வாகப் பலகை</span></a>
+          <a href="/admin/logout"><span class="lang-en">Logout</span><span class="lang-ta">வெளியேறு</span></a>
+          <div class="language-picker" aria-label="Choose language / மொழியைத் தேர்ந்தெடுக்கவும்">
+            <button type="button" data-language-choice="en">English</button>
+            <button type="button" data-language-choice="ta">தமிழ்</button>
+          </div>
+        </nav>
+      </div>
+    </header>
+    <main class="admin-shell">
+      <div class="container">
+        <div class="section-header">
+          <div class="eyebrow">PTK · நிர்வாகம்</div>
+          <h2><span class="lang-en">Member management</span><span class="lang-ta">உறுப்பினர் நிர்வாகம்</span></h2>
+          <p><span class="lang-en">Review applications and manage member cards, addresses, and membership status.</span><span class="lang-ta">விண்ணப்பங்களைப் பரிசீலித்து, உறுப்பினர் அட்டைகள், முகவரிகள் மற்றும் உறுப்பினர் நிலையை நிர்வகிக்கவும்.</span></p>
+        </div>
+
+        <% if (notice) { %><div class="notice success"><span class="lang-en"><%= notice %></span><span class="lang-ta"><%= notice === 'Member details saved.' ? 'உறுப்பினர் விவரங்கள் சேமிக்கப்பட்டன.' : notice === 'Member and card activated.' ? 'உறுப்பினரும் அட்டையும் செயல்படுத்தப்பட்டன.' : notice === 'Member and card deactivated.' ? 'உறுப்பினரும் அட்டையும் செயலிழக்கச் செய்யப்பட்டன.' : 'உறுப்பினரும் தொடர்புடைய விண்ணப்பமும் நீக்கப்பட்டன.' %></span></div><% } %>
+
+        <div class="member-toolbar">
+          <label for="memberSearch"><span class="lang-en">Search applications and members</span><span class="lang-ta">விண்ணப்பங்கள் மற்றும் உறுப்பினர்களைத் தேடவும்</span></label>
+          <input id="memberSearch" class="member-search" type="search" placeholder="Name, member ID, phone, or full address / பெயர், அடையாள எண், தொலைபேசி அல்லது முழு முகவரி" aria-label="Search members / உறுப்பினர்களைத் தேடவும்" />
+          <a class="btn btn-primary" href="/admin/export/csv/members"><span class="lang-en">Export members CSV</span><span class="lang-ta">உறுப்பினர் CSV பதிவிறக்கம்</span></a>
+        </div>
+
+        <section class="dashboard-panel" id="applications" style="margin-bottom: 24px;">
+          <h3><span class="lang-en">Applications to review</span><span class="lang-ta">பரிசீலிக்க வேண்டிய விண்ணப்பங்கள்</span> (<%= applications.length %>)</h3>
+          <div class="table-wrap">
+            <table id="applicationsTable">
+              <thead>
+                <tr>
+                  <th><span class="lang-en">Reference / Date</span><span class="lang-ta">குறிப்பு எண் / தேதி</span></th>
+                  <th><span class="lang-en">Applicant</span><span class="lang-ta">விண்ணப்பதாரர்</span></th>
+                  <th><span class="lang-en">Full address — important</span><span class="lang-ta">முழு முகவரி — முக்கியம்</span></th>
+                  <th><span class="lang-en">Category</span><span class="lang-ta">வகை</span></th>
+                  <th><span class="lang-en">Status</span><span class="lang-ta">நிலை</span></th>
+                  <th><span class="lang-en">Actions</span><span class="lang-ta">செயல்கள்</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!applications.length) { %>
+                  <tr><td colspan="6" class="empty-state"><span class="lang-en">There are no pending or rejected applications to review.</span><span class="lang-ta">பரிசீலிக்க நிலுவையில் அல்லது நிராகரிக்கப்பட்ட விண்ணப்பங்கள் இல்லை.</span></td></tr>
+                <% } %>
+                <% applications.forEach((application) => { %>
+                  <tr data-search-row>
+                    <td><strong><%= application.application_ref %></strong><br /><%= formatDate(application.created_at) %></td>
+                    <td><strong><%= application.full_name %></strong><% if (application.tamil_name) { %><br /><%= application.tamil_name %><% } %><br /><%= application.phone %><% if (application.email) { %><br /><%= application.email %><% } %></td>
+                    <td class="member-address"><%= application.address || '—' %><br /><span class="meta"><%= application.local_unit %>, <%= application.district %></span></td>
+                    <td><%= application.membership_category %></td>
+                    <td><span class="member-status <%= application.status %>"><span class="lang-en"><%= application.status === 'pending' ? 'Pending' : 'Rejected' %></span><span class="lang-ta"><%= application.status === 'pending' ? 'நிலுவை' : 'நிராகரிக்கப்பட்டது' %></span></span></td>
+                    <td class="member-actions">
+                      <form method="POST" action="/admin/application/<%= application.id %>/status">
+                        <input type="hidden" name="return_to" value="members" />
+                        <input type="hidden" name="status" value="approved" />
+                        <button class="btn btn-primary" type="submit"><span class="lang-en"><%= application.status === 'rejected' ? 'Reopen · Approve' : 'Approve' %></span><span class="lang-ta"><%= application.status === 'rejected' ? 'மீண்டும் திற · அங்கீகரி' : 'அங்கீகரி' %></span></button>
+                      </form>
+                      <% if (application.status === 'pending') { %>
+                        <form method="POST" action="/admin/application/<%= application.id %>/status">
+                          <input type="hidden" name="return_to" value="members" />
+                          <input type="hidden" name="status" value="rejected" />
+                          <button class="btn btn-secondary" type="submit"><span class="lang-en">Reject</span><span class="lang-ta">நிராகரி</span></button>
+                        </form>
+                      <% } %>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="dashboard-panel" id="members">
+          <h3><span class="lang-en">Member directory<%= memberFilter ? ' · Active members' : '' %></span><span class="lang-ta">உறுப்பினர் பட்டியல்<%= memberFilter ? ' · செயல்பாட்டிலுள்ளவர்கள்' : '' %></span> (<%= members.length %>)</h3>
+          <% if (memberFilter) { %><p><a href="/admin/members"><span class="lang-en">Show all members</span><span class="lang-ta">அனைத்து உறுப்பினர்களையும் காட்டு</span></a></p><% } %>
+          <div class="table-wrap">
+            <table id="membersTable">
+              <thead>
+                <tr>
+                  <th><span class="lang-en">Member ID / Application ID / Date</span><span class="lang-ta">உறுப்பினர் / விண்ணப்ப அடையாள எண் / தேதி</span></th>
+                  <th><span class="lang-en">Member / Phone</span><span class="lang-ta">உறுப்பினர் / தொலைபேசி</span></th>
+                  <th><span class="lang-en">Full address — important</span><span class="lang-ta">முழு முகவரி — முக்கியம்</span></th>
+                  <th><span class="lang-en">Category</span><span class="lang-ta">வகை</span></th>
+                  <th><span class="lang-en">Status</span><span class="lang-ta">நிலை</span></th>
+                  <th><span class="lang-en">Card</span><span class="lang-ta">அட்டை</span></th>
+                  <th><span class="lang-en">Actions</span><span class="lang-ta">செயல்கள்</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!members.length) { %>
+                  <tr><td colspan="7" class="empty-state"><span class="lang-en">No approved members yet. Approve an application above to issue a member card.</span><span class="lang-ta">அங்கீகரிக்கப்பட்ட உறுப்பினர்கள் இல்லை. மேலே உள்ள விண்ணப்பத்தை அங்கீகரித்து உறுப்பினர் அட்டையை வழங்கவும்.</span></td></tr>
+                <% } %>
+                <% members.forEach((member) => { %>
+                  <tr data-search-row>
+                    <td>
+                      <strong><%= member.member_id %></strong><br />
+                      <% if (member.application_ref) { %>
+                        <span class="meta"><span class="lang-en">Application:</span><span class="lang-ta">விண்ணப்பம்:</span> <strong><%= member.application_ref %></strong></span><br />
+                        <span class="member-status <%= member.application_status %>"><span class="lang-en">Application <%= member.application_status %></span><span class="lang-ta">விண்ணப்பம்: <%= member.application_status === 'approved' ? 'அங்கீகரிக்கப்பட்டது' : member.application_status === 'rejected' ? 'நிராகரிக்கப்பட்டது' : 'நிலுவையில்' %></span></span><br />
+                      <% } %>
+                      <%= formatDate(member.created_at) %>
+                    </td>
+                    <td><strong><%= member.full_name %></strong><% if (member.tamil_name) { %><br /><%= member.tamil_name %><% } %><br /><%= member.phone %><% if (member.email) { %><br /><%= member.email %><% } %></td>
+                    <td class="member-address"><%= member.address || '—' %><br /><span class="meta"><%= member.local_unit %>, <%= member.district %></span></td>
+                    <td><%= member.membership_category %></td>
+                    <td><span class="member-status <%= member.status %>"><span class="lang-en"><%= member.status === 'active' ? 'Active' : 'Inactive' %></span><span class="lang-ta"><%= member.status === 'active' ? 'செயல்பாட்டில்' : 'செயலிழந்தது' %></span></span></td>
+                    <td><% if (member.card_status === 'active' && member.status === 'active') { %><span class="member-status active">✓ <span class="lang-en">Issued</span><span class="lang-ta">வழங்கப்பட்டது</span></span><% } else { %><span class="member-status revoked"><span class="lang-en">Inactive / not issued</span><span class="lang-ta">செயலிழந்தது / வழங்கப்படவில்லை</span></span><% } %></td>
+                    <td class="member-actions">
+                      <% if (member.status === 'active') { %>
+                        <form method="POST" action="/admin/members/<%= member.id %>/status">
+                          <input type="hidden" name="status" value="inactive" />
+                          <button class="btn btn-secondary" type="submit"><span class="lang-en">Deactivate</span><span class="lang-ta">செயலிழக்கச் செய்</span></button>
+                        </form>
+                      <% } else { %>
+                        <form method="POST" action="/admin/members/<%= member.id %>/status">
+                          <input type="hidden" name="status" value="active" />
+                          <button class="btn btn-primary" type="submit"><span class="lang-en">Reactivate</span><span class="lang-ta">மீண்டும் செயல்படுத்து</span></button>
+                        </form>
+                      <% } %>
+                      <a class="btn btn-secondary" href="/admin/card/<%= encodeURIComponent(member.member_id) %>"><span class="lang-en">Card</span><span class="lang-ta">அட்டை</span></a>
+                      <details class="member-edit">
+                        <summary><span class="lang-en">Edit</span><span class="lang-ta">திருத்து</span></summary>
+                        <form method="POST" action="/admin/members/<%= member.id %>/edit" enctype="multipart/form-data">
+                          <div class="member-edit-grid">
+                            <div><label><span class="lang-en">Full name</span><span class="lang-ta">முழுப் பெயர்</span><input name="full_name" value="<%= member.full_name %>" required /></label></div>
+                            <div><label><span class="lang-en">Tamil name</span><span class="lang-ta">தமிழ்ப் பெயர்</span><input name="tamil_name" value="<%= member.tamil_name || '' %>" /></label></div>
+                            <div><label><span class="lang-en">Phone</span><span class="lang-ta">தொலைபேசி</span><input name="phone" value="<%= member.phone %>" required /></label></div>
+                            <div><label><span class="lang-en">Email</span><span class="lang-ta">மின்னஞ்சல்</span><input name="email" type="email" value="<%= member.email || '' %>" /></label></div>
+                            <div><label><span class="lang-en">District</span><span class="lang-ta">மாவட்டம்</span><input name="district" value="<%= member.district %>" required /></label></div>
+                            <div><label><span class="lang-en">Local unit</span><span class="lang-ta">உள்ளூர் பிரிவு</span><input name="local_unit" value="<%= member.local_unit %>" required /></label></div>
+                            <div><label><span class="lang-en">Category</span><span class="lang-ta">வகை</span><input name="membership_category" value="<%= member.membership_category %>" required /></label></div>
+                          </div>
+                          <label><span class="lang-en">Full address — required</span><span class="lang-ta">முழு முகவரி — அவசியம்</span><textarea name="address" required><%= member.address || '' %></textarea></label>
+                          <label><span class="lang-en">Member photo (JPG/PNG/WEBP, max 5 MB)</span><span class="lang-ta">உறுப்பினர் படம் (JPG/PNG/WEBP, அதிகபட்சம் 5 MB)</span>
+                            <% if (member.photo_url) { %><img class="asset-preview" src="<%= member.photo_url %>" alt="Current member photo" /><% } %>
+                            <input type="file" name="member_photo" accept="image/jpeg,image/png,image/webp" />
+                          </label>
+                          <button class="btn btn-primary" type="submit"><span class="lang-en">Save changes</span><span class="lang-ta">மாற்றங்களைச் சேமி</span></button>
+                        </form>
+                      </details>
+                      <form method="POST" action="/admin/members/<%= member.id %>/delete" onsubmit="return confirm(document.body.dataset.language === 'ta' ? 'இந்த உறுப்பினர், அட்டை மற்றும் விண்ணப்பத்தை நிரந்தரமாக நீக்கவா?' : 'Permanently delete this member, card, and linked application?')">
+                        <button class="btn btn-secondary" type="submit"><span class="lang-en">Delete</span><span class="lang-ta">நீக்கு</span></button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script>
+      const search = document.getElementById('memberSearch');
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLocaleLowerCase();
+        document.querySelectorAll('[data-search-row]').forEach(row => {
+          row.hidden = !row.innerText.toLocaleLowerCase().includes(query);
+        });
+      });
+    </script>
+  </body>
+</html>
