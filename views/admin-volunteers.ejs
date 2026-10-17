@@ -87,6 +87,7 @@
                             <label>Full address — required<textarea name="address" required><%= vol.address || '' %></textarea></label>
                             <label>Member photo (JPG/PNG/WEBP, max 5 MB)
                               <% if (vol.photo_url) { %><img class="asset-preview" src="<%= vol.photo_url %>" alt="Current member photo" /><% } %>
+                              <% if (vol.photo_url) { %><span><input type="checkbox" name="clear_photo" value="1" /> Remove current photo</span><% } %>
                               <input type="file" name="member_photo" accept="image/jpeg,image/png,image/webp" />
                             </label>
                             <label>Admin note<textarea name="review_note" maxlength="1000"><%= vol.review_note || '' %></textarea></label>

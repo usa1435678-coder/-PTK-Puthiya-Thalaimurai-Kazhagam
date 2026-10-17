@@ -30,6 +30,7 @@
           <div class="eyebrow">Events</div>
           <h2>Create and publish public events</h2>
         </div>
+        <% if (success) { %><div class="notice success"><%= success %></div><% } %>
         <div class="form-shell">
           <form method="POST" action="/admin/events">
             <div class="form-row">
@@ -65,15 +66,33 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Title</th><th>Date</th><th>Location</th><th>Published</th></tr>
+                <tr><th>Title / edit</th><th>Date</th><th>Location</th><th>Published</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 <% events.forEach((event) => { %>
                   <tr>
-                    <td><%= event.title %></td>
+                    <td>
+                      <strong><%= event.title %></strong>
+                      <details style="margin-top: 8px;">
+                        <summary>Edit event</summary>
+                        <form method="POST" action="/admin/events/<%= event.id %>/edit" style="margin-top: 12px;">
+                          <label>Title<input name="title" value="<%= event.title %>" required /></label>
+                          <label>Date<input name="event_date" type="date" value="<%= event.event_date || '' %>" required /></label>
+                          <label>Location<input name="location" value="<%= event.location || '' %>" /></label>
+                          <label>Description<textarea name="description" required><%= event.description || '' %></textarea></label>
+                          <label class="checkbox-row"><input type="checkbox" name="published" value="1" <%= event.published ? 'checked' : '' %> /> Published</label>
+                          <button class="btn btn-primary" type="submit">Save changes</button>
+                        </form>
+                      </details>
+                    </td>
                     <td><%= formatDate(event.event_date) %></td>
                     <td><%= event.location || '—' %></td>
                     <td><%= event.published ? 'Yes' : 'No' %></td>
+                    <td>
+                      <form method="POST" action="/admin/events/<%= event.id %>/delete" onsubmit="return confirm('Permanently delete this event?')">
+                        <button class="btn btn-secondary" type="submit">Delete</button>
+                      </form>
+                    </td>
                   </tr>
                 <% }) %>
               </tbody>
