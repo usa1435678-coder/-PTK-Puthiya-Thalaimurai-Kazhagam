@@ -37,7 +37,7 @@ On first startup, a high-entropy administrator password is generated and written
 - SQLite write-ahead logging and full synchronous commits are enabled for safer durable writes
 - Full SQLite snapshots and copies of uploaded files are created at startup if needed, every 24 hours, and before administrator restore/delete operations. They are never automatically deleted.
 - Downloaded snapshots include administrator password hashes; protect them and store an extra copy outside the web service.
-- Database snapshots do not contain uploaded image binaries; persist both the database and upload directories so member and branding images survive redeploys.
+- Full automatic snapshots include all database tables and a copy of uploaded image files. The separate JSON export does not include uploaded binaries; keep the upload directory on the persistent disk so images survive redeploys.
 
 ## Features Implemented
 
