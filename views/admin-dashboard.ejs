@@ -53,6 +53,12 @@
             <div class="eyebrow">Dashboard</div>
             <h2>PTK administration overview</h2>
           </div>
+          <% if (!persistentStorageConfigured) { %>
+            <div class="notice error">
+              Production data is on temporary storage and may be erased on restart or redeploy.
+              Download regular backups and configure a persistent Render disk under System settings.
+            </div>
+          <% } %>
 
           <div class="dashboard-panels">
             <a class="dashboard-panel dashboard-stat" href="#recent-applications"><strong><%= stats.applications %></strong><span>Applications</span></a>

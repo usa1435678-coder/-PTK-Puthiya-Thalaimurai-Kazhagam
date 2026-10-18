@@ -3,15 +3,59 @@ require('express-async-errors');
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
+const sqlite3 = require('sqlite3');
 const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { db, initDatabase, getSettings, getAllRows, getRow, runQuery, csvEscape, addAuditLog } = require('./db');
+const {
+  db,
+  initDatabase,
+  createDatabaseBackup,
+  listDatabaseBackups,
+  restoreBackupUploads,
+  backupDirectory,
+  getSettings,
+  getAllRows,
+  getRow,
+  runQuery,
+  csvEscape,
+  addAuditLog
+} = require('./db');
 
 const app = express();
 const port = process.env.PORT || 3000;
 const uploadDirectory = process.env.UPLOAD_DIR || path.join(__dirname, 'public', 'uploads');
+const persistentStorageRoot = path.resolve(process.env.PERSISTENT_STORAGE_ROOT || '/var/data');
+function isPersistentStorageMounted(mountPath) {
+  try {
+    const mountInfo = fs.readFileSync('/proc/self/mountinfo', 'utf8');
+    return mountInfo.split('\n').some(line => {
+      const fields = line.split(' - ')[0].split(' ');
+      const mountedAt = fields[4] && fields[4].replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
+      return mountedAt && path.resolve(mountedAt) === mountPath;
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'EACCES') return false;
+    throw error;
+  }
+}
+const isInsidePersistentStorage = (targetPath) => {
+  const relative = path.relative(persistentStorageRoot, path.resolve(targetPath));
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+};
+const persistentStorageConfigured = process.env.NODE_ENV !== 'production' || (
+  !!process.env.DB_PATH &&
+  !!process.env.BACKUP_DIR &&
+  !!process.env.UPLOAD_DIR &&
+  !!process.env.MEMBER_CSV_PATH &&
+  !!process.env.PERSISTENT_STORAGE_ROOT &&
+  isPersistentStorageMounted(persistentStorageRoot) &&
+  isInsidePersistentStorage(process.env.DB_PATH) &&
+  isInsidePersistentStorage(process.env.BACKUP_DIR) &&
+  isInsidePersistentStorage(process.env.UPLOAD_DIR) &&
+  isInsidePersistentStorage(process.env.MEMBER_CSV_PATH)
+);
 const loginAttempts = new Map();
 const loginAttemptWindowMs = 15 * 60 * 1000;
 const maxLoginAttempts = 5;
@@ -37,6 +81,16 @@ const upload = multer({
   fileFilter: (req, file, callback) => {
     if (!imageExtensions[file.mimetype]) {
       return callback(new Error('Only JPG, PNG, and WEBP images are allowed.'));
+    }
+    callback(null, true);
+  }
+});
+const backupUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, callback) => {
+    if (!file.originalname.toLowerCase().endsWith('.json') || (file.mimetype !== 'application/json' && file.mimetype !== 'text/json' && file.mimetype !== 'text/plain' && file.mimetype !== 'application/octet-stream')) {
+      return callback(new Error('Backup upload must be a JSON file.'));
     }
     callback(null, true);
   }
@@ -168,8 +222,9 @@ async function removeUnusedMemberPhoto(photoUrl) {
     `SELECT id FROM members WHERE photo_url = ?
      UNION ALL SELECT id FROM membership_applications WHERE photo_url = ?
      UNION ALL SELECT id FROM volunteers WHERE photo_url = ?
+     UNION ALL SELECT setting_key AS id FROM settings WHERE setting_value = ?
      LIMIT 1`,
-    [photoUrl, photoUrl, photoUrl]
+    [photoUrl, photoUrl, photoUrl, photoUrl]
   );
   if (!remaining) {
     await fs.promises.unlink(path.join(uploadDirectory, filename)).catch(error => {
@@ -440,6 +495,8 @@ app.get('/admin/dashboard', requireAuth, async (req, res) => {
     members,
     cards,
     logs,
+    persistentStorageConfigured,
+    persistentStorageRoot,
     formatDate
   });
 });
@@ -505,6 +562,101 @@ app.post('/admin/application/:id/status', requireAuth, async (req, res) => {
   res.redirect(redirectPath);
 });
 
+app.post('/admin/application/:id/edit', requireAuth, upload.single('member_photo'), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) {
+    if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
+    return res.status(400).send('Invalid application ID.');
+  }
+  const application = await getRow('SELECT * FROM membership_applications WHERE id = ?', [id]);
+  if (!application) {
+    if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
+    return res.status(404).send('Application not found.');
+  }
+  if (!['pending', 'rejected'].includes(application.status)) {
+    if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
+    return res.status(409).send('Only pending or rejected applications can be edited here.');
+  }
+
+  const updated = {
+    full_name: (req.body.full_name || '').trim(),
+    tamil_name: (req.body.tamil_name || '').trim(),
+    phone: (req.body.phone || '').trim(),
+    email: (req.body.email || '').trim(),
+    district: (req.body.district || '').trim(),
+    local_unit: (req.body.local_unit || '').trim(),
+    address: (req.body.address || '').trim(),
+    membership_category: (req.body.membership_category || '').trim()
+  };
+  if (!updated.full_name || !updated.phone || !updated.district || !updated.local_unit || !updated.membership_category) {
+    if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
+    return res.status(400).send('Name, phone, district, local unit, and membership category are required.');
+  }
+  const duplicate = await getRow(
+    'SELECT id FROM membership_applications WHERE id != ? AND (LOWER(phone) = LOWER(?) OR (? != \'\' AND LOWER(email) = LOWER(?))) LIMIT 1',
+    [id, updated.phone, updated.email, updated.email]
+  );
+  const duplicateMember = await getRow(
+    'SELECT id FROM members WHERE LOWER(phone) = LOWER(?) OR (? != \'\' AND LOWER(email) = LOWER(?)) LIMIT 1',
+    [updated.phone, updated.email, updated.email]
+  );
+  if (duplicate || duplicateMember) {
+    if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
+    return res.status(409).send('Another application already uses this phone number or email.');
+  }
+
+  const photoUrl = req.file
+    ? `/uploads/${req.file.filename}`
+    : req.body.clear_photo === '1' ? null : application.photo_url;
+  if (application.photo_url && application.photo_url !== photoUrl) await createDatabaseBackup('before-delete');
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    await runQuery(`
+      UPDATE membership_applications
+      SET full_name = ?, tamil_name = ?, phone = ?, email = ?, district = ?, local_unit = ?,
+          address = ?, photo_url = ?, membership_category = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `, [
+      updated.full_name, updated.tamil_name || null, updated.phone, updated.email || null,
+      updated.district, updated.local_unit, updated.address || null, photoUrl,
+      updated.membership_category, id
+    ]);
+    await addAuditLog('membership_application_updated', `Application ${application.application_ref} details updated`, 'membership_application', id, req.session.user.username);
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
+    throw error;
+  }
+
+  if (application.photo_url !== photoUrl) await removeUnusedMemberPhoto(application.photo_url);
+  await syncMemberCsv();
+  res.redirect('/admin/members?saved=application-edited');
+});
+
+app.post('/admin/application/:id/delete', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid application ID.');
+  const application = await getRow('SELECT * FROM membership_applications WHERE id = ?', [id]);
+  if (!application) return res.status(404).send('Application not found.');
+  if (application.status === 'approved') {
+    return res.status(409).send('Approved applications are linked to a member. Delete the member from the member directory instead.');
+  }
+  await createDatabaseBackup('before-delete');
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    await runQuery('DELETE FROM membership_applications WHERE id = ?', [id]);
+    await addAuditLog('membership_application_deleted', `Application ${application.application_ref} deleted`, 'membership_application', application.id, req.session.user.username);
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    throw error;
+  }
+  await removeUnusedMemberPhoto(application.photo_url);
+  await syncMemberCsv();
+  res.redirect('/admin/members?saved=application-deleted');
+});
+
 app.get('/admin/members', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const members = await getAllRows(`
@@ -523,6 +675,8 @@ app.get('/admin/members', requireAuth, async (req, res) => {
   `);
   const notices = {
     edited: 'Member details saved.',
+    'application-edited': 'Application details saved.',
+    'application-deleted': 'Application deleted.',
     activated: 'Member and card activated.',
     deactivated: 'Member and card deactivated.',
     deleted: 'Member and linked application deleted.'
@@ -589,7 +743,9 @@ app.post('/admin/members/:id/edit', requireAuth, upload.single('member_photo'), 
     return res.status(404).send('Member not found.');
   }
 
-  const newPhotoUrl = req.file ? `/uploads/${req.file.filename}` : member.photo_url;
+  const newPhotoUrl = req.file
+    ? `/uploads/${req.file.filename}`
+    : req.body.clear_photo === '1' ? null : member.photo_url;
   const discardUploadedPhoto = async () => {
     if (req.file) await removeUnusedMemberPhoto(newPhotoUrl);
   };
@@ -609,14 +765,15 @@ app.post('/admin/members/:id/edit', requireAuth, upload.single('member_photo'), 
   }
 
   const duplicate = await getRow(
-    'SELECT id FROM members WHERE phone = ? AND id != ?',
-    [updated.phone, member.id]
+    'SELECT id FROM members WHERE id != ? AND (phone = ? OR (? != \'\' AND LOWER(email) = LOWER(?))) LIMIT 1',
+    [member.id, updated.phone, updated.email, updated.email]
   );
   if (duplicate) {
     await discardUploadedPhoto();
     return res.status(409).send('Another member already uses this phone number.');
   }
 
+  if (member.photo_url && member.photo_url !== newPhotoUrl) await createDatabaseBackup('before-delete');
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {
     await runQuery(`
@@ -679,7 +836,7 @@ app.post('/admin/members/:id/edit', requireAuth, upload.single('member_photo'), 
     throw error;
   }
 
-  if (req.file && member.photo_url !== newPhotoUrl) {
+  if (member.photo_url !== newPhotoUrl) {
     await removeUnusedMemberPhoto(member.photo_url);
   }
   await syncMemberCsv();
@@ -691,6 +848,7 @@ app.post('/admin/members/:id/delete', requireAuth, async (req, res) => {
   if (!member) return res.status(404).send('Member not found.');
   const photos = new Set([member.photo_url].filter(Boolean));
 
+  await createDatabaseBackup('before-delete');
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {
     const applications = await getAllRows(
@@ -727,7 +885,39 @@ app.post('/admin/members/:id/delete', requireAuth, async (req, res) => {
 
 app.get('/admin/branding', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
-  res.render('admin-branding', { settings, success: null, error: null });
+  const notices = {
+    updated: 'Branding settings saved.',
+    default: 'Built-in PTK image restored.'
+  };
+  res.render('admin-branding', {
+    settings,
+    success: notices[req.query.saved] || null,
+    error: null,
+    persistentStorageConfigured
+  });
+});
+
+app.post('/admin/branding/default/:asset', requireAuth, async (req, res) => {
+  const builtInAssets = {
+    logo: { setting: 'logo_url', url: '/branding/ptk-logo.jpeg' },
+    flag: { setting: 'flag_url', url: '/branding/ptk-flag.png' },
+    leader: { setting: 'leader_photo_url', url: '/branding/ptk-leader.jpeg' },
+    signature: { setting: 'signature_url', url: '/branding/ptk-signature.png' }
+  };
+  const asset = builtInAssets[req.params.asset];
+  if (!asset) return res.status(404).send('Built-in branding asset not found.');
+
+  const previous = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [asset.setting]);
+  if (previous && previous.setting_value !== asset.url && previous.setting_value.startsWith('/uploads/')) {
+    await createDatabaseBackup('before-delete');
+  }
+  await runQuery(
+    'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+    [asset.setting, asset.url]
+  );
+  if (previous && previous.setting_value !== asset.url) await removeUnusedMemberPhoto(previous.setting_value);
+  await addAuditLog('branding_default_restored', `Built-in ${req.params.asset} image restored`, 'settings', asset.setting, req.session.user.username);
+  res.redirect('/admin/branding?saved=default');
 });
 
 app.post('/admin/branding', requireAuth, upload.fields([
@@ -739,40 +929,50 @@ app.post('/admin/branding', requireAuth, upload.fields([
   { name: 'card_background_file', maxCount: 1 }
 ]), async (req, res) => {
   const settings = await loadSiteSettings();
-  const uploadedUrl = (field, existingValue) => {
+  const uploadedUrl = (field, settingKey) => {
     const file = req.files && req.files[field] && req.files[field][0];
-    return file ? `/uploads/${file.filename}` : (existingValue || '');
+    if (file) return `/uploads/${file.filename}`;
+    return req.body[`clear_${settingKey}`] === '1' ? '' : (settings[settingKey] || '');
   };
+  const textValue = (field, settingKey) => typeof req.body[field] === 'string'
+    ? req.body[field].trim()
+    : (settings[settingKey] || '');
   const colorValue = (value, fallback) => /^#[0-9a-f]{6}$/i.test(value || '') ? value : fallback;
   const payload = {
-    party_name_tamil: req.body.party_name_tamil || settings.party_name_tamil,
-    party_name_english: req.body.party_name_english || settings.party_name_english,
-    tagline: req.body.tagline || settings.tagline,
-    leader_name: req.body.leader_name || settings.leader_name,
-    leader_title: req.body.leader_title || settings.leader_title,
-    contact_email: req.body.contact_email || settings.contact_email,
-    contact_phone: req.body.contact_phone || settings.contact_phone,
-    contact_address: req.body.contact_address || settings.contact_address,
+    party_name_tamil: textValue('party_name_tamil', 'party_name_tamil'),
+    party_name_english: textValue('party_name_english', 'party_name_english'),
+    tagline: textValue('tagline', 'tagline'),
+    leader_name: textValue('leader_name', 'leader_name'),
+    leader_title: textValue('leader_title', 'leader_title'),
+    contact_email: textValue('contact_email', 'contact_email'),
+    contact_phone: textValue('contact_phone', 'contact_phone'),
+    contact_address: textValue('contact_address', 'contact_address'),
     card_red: colorValue(req.body.card_red, settings.card_red || '#A8202B'),
     card_yellow: colorValue(req.body.card_yellow, settings.card_yellow || '#F2C744'),
     card_green: colorValue(req.body.card_green, settings.card_green || '#16734B'),
-    logo_url: uploadedUrl('logo_file', settings.logo_url),
-    leader_photo_url: uploadedUrl('leader_photo_file', settings.leader_photo_url),
-    flag_url: uploadedUrl('flag_file', settings.flag_url),
-    signature_url: uploadedUrl('signature_file', settings.signature_url),
-    hero_background_url: uploadedUrl('hero_background_file', settings.hero_background_url),
-    card_background_url: uploadedUrl('card_background_file', settings.card_background_url),
-    about_text: req.body.about_text || settings.about_text,
-    mission_text: req.body.mission_text || settings.mission_text,
-    vision_text: req.body.vision_text || settings.vision_text
+    logo_url: uploadedUrl('logo_file', 'logo_url'),
+    leader_photo_url: uploadedUrl('leader_photo_file', 'leader_photo_url'),
+    flag_url: uploadedUrl('flag_file', 'flag_url'),
+    signature_url: uploadedUrl('signature_file', 'signature_url'),
+    hero_background_url: uploadedUrl('hero_background_file', 'hero_background_url'),
+    card_background_url: uploadedUrl('card_background_file', 'card_background_url'),
+    about_text: textValue('about_text', 'about_text'),
+    mission_text: textValue('mission_text', 'mission_text'),
+    vision_text: textValue('vision_text', 'vision_text')
   };
-
+  const oldUploadUrls = ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']
+    .map(key => settings[key])
+    .filter(url => url && url.startsWith('/uploads/') && !Object.values(payload).includes(url));
+  if (oldUploadUrls.length) await createDatabaseBackup('before-delete');
   for (const [key, value] of Object.entries(payload)) {
     await runQuery('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value', [key, value]);
   }
+  for (const key of ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']) {
+    if (settings[key] && settings[key] !== payload[key]) await removeUnusedMemberPhoto(settings[key]);
+  }
 
   await addAuditLog('branding_updated', 'Branding settings updated', 'settings', 'branding', req.session.user.username);
-  res.render('admin-branding', { settings: await loadSiteSettings(), success: 'Branding settings saved.', error: null });
+  res.redirect('/admin/branding?saved=updated');
 });
 
 app.get('/admin/content', requireAuth, async (req, res) => {
@@ -822,11 +1022,18 @@ app.get('/admin/export/csv/:type', requireAuth, async (req, res) => {
 
 app.get('/admin/backup', requireAuth, async (req, res) => {
   const tables = [
-    'settings', 'announcements', 'events', 'membership_applications', 'members', 'cards', 'volunteers', 'grievances', 'contact_requests', 'finance_records', 'audit_logs', 'users'
+    'settings', 'districts', 'announcements', 'events', 'membership_applications', 'members', 'cards', 'volunteers', 'grievances', 'contact_requests', 'finance_records', 'audit_logs'
   ];
   const data = {};
-  for (const table of tables) {
-    data[table] = await getAllRows(`SELECT * FROM ${table}`);
+  await runQuery('BEGIN DEFERRED TRANSACTION');
+  try {
+    for (const table of tables) {
+      data[table] = await getAllRows(`SELECT * FROM ${table}`);
+    }
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    throw error;
   }
   const payload = {
     version: 1,
@@ -838,12 +1045,116 @@ app.get('/admin/backup', requireAuth, async (req, res) => {
   res.send(JSON.stringify(payload, null, 2));
 });
 
-app.get('/admin/settings', requireAuth, async (req, res) => {
-  res.render('admin-backup', { settings: await loadSiteSettings() });
+app.get('/admin/automatic-backups/:filename', requireAuth, async (req, res, next) => {
+  const backups = await listDatabaseBackups();
+  const backup = backups.find(item => item.filename === req.params.filename);
+  if (!backup) return res.status(404).send('Database backup not found.');
+  res.download(path.join(backupDirectory, backup.filename), backup.filename, error => {
+    if (error) next(error);
+  });
 });
 
-app.post('/admin/restore', requireAuth, async (req, res) => {
-  const backupText = req.body.backup_json || '';
+app.post('/admin/automatic-backups/create', requireAuth, async (req, res) => {
+  await createDatabaseBackup('manual');
+  res.redirect('/admin/settings?saved=full-backup-created');
+});
+
+app.post('/admin/automatic-backups/:filename/restore', requireAuth, async (req, res) => {
+  const backups = await listDatabaseBackups();
+  const backup = backups.find(item => item.filename === req.params.filename);
+  if (!backup) return res.status(404).send('Database backup not found.');
+
+  const snapshotPath = path.join(backupDirectory, backup.filename);
+  const snapshotDb = await new Promise((resolve, reject) => {
+    const snapshot = new sqlite3.Database(snapshotPath, sqlite3.OPEN_READONLY, error => {
+      if (error) return reject(error);
+      resolve(snapshot);
+    });
+  });
+
+  try {
+    const integrity = await new Promise((resolve, reject) => {
+      snapshotDb.get('PRAGMA integrity_check', (error, row) => error ? reject(error) : resolve(row && row.integrity_check));
+    });
+    if (integrity !== 'ok') return res.status(400).send('This database snapshot failed its integrity check.');
+    const tables = await new Promise((resolve, reject) => {
+      snapshotDb.all("SELECT name FROM sqlite_master WHERE type = 'table'", (error, rows) => error ? reject(error) : resolve(rows.map(row => row.name)));
+    });
+    const requiredTables = [
+      'settings', 'users', 'districts', 'membership_applications', 'members', 'cards', 'announcements',
+      'events', 'volunteers', 'grievances', 'contact_requests', 'finance_records', 'audit_logs'
+    ];
+    if (requiredTables.some(table => !tables.includes(table))) {
+      return res.status(400).send('This database snapshot does not contain the complete PTK database schema.');
+    }
+
+    await createDatabaseBackup('before-restore');
+    await new Promise((resolve, reject) => {
+      const restore = db.backup(snapshotPath, 'main', 'main', false, error => {
+        if (error) return reject(error);
+        restore.step(-1, stepError => stepError ? reject(stepError) : resolve());
+      });
+    });
+  } finally {
+    await new Promise((resolve, reject) => snapshotDb.close(error => error ? reject(error) : resolve()));
+  }
+
+  await restoreBackupUploads(backup.filename);
+  await syncMemberCsv();
+  await addAuditLog(
+    'database_snapshot_restored',
+    `Full database snapshot ${backup.filename} restored; the administrator account and password were restored to the snapshot state.`,
+    'system',
+    backup.filename,
+    req.session.user.username
+  );
+  res.redirect('/admin/settings?saved=database-restored');
+});
+
+app.post('/admin/settings/password', requireAuth, async (req, res) => {
+  const currentPassword = typeof req.body.current_password === 'string' ? req.body.current_password : '';
+  const newPassword = typeof req.body.new_password === 'string' ? req.body.new_password : '';
+  const confirmPassword = typeof req.body.confirm_password === 'string' ? req.body.confirm_password : '';
+  const user = await getRow('SELECT id, password_hash FROM users WHERE id = ?', [req.session.user.id]);
+  if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) {
+    return res.status(400).send('The current administrator password is incorrect.');
+  }
+  if (newPassword.length < 16) {
+    return res.status(400).send('The new administrator password must be at least 16 characters long.');
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).send('The new administrator passwords do not match.');
+  }
+
+  const passwordHash = bcrypt.hashSync(newPassword, 12);
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    await runQuery('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, user.id]);
+    await addAuditLog('administrator_password_changed', 'Administrator password changed by the authenticated administrator', 'user', user.id, req.session.user.username);
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    throw error;
+  }
+  res.redirect('/admin/settings?saved=password');
+});
+
+app.get('/admin/settings', requireAuth, async (req, res) => {
+  const backups = await listDatabaseBackups();
+  res.render('admin-backup', {
+    settings: await loadSiteSettings(),
+    persistentStorageConfigured,
+    persistentStorageRoot,
+    automaticBackups: backups.slice(0, 20),
+    automaticBackupCount: backups.length,
+    success: req.query.saved === 'password' ? 'Administrator password changed.'
+      : req.query.saved === 'database-restored' ? 'Full database snapshot restored. Use the administrator password stored in that snapshot if it has changed.'
+        : req.query.saved === 'full-backup-created' ? 'Full database and uploaded-file snapshot created.' : null
+  });
+});
+
+app.post('/admin/restore', requireAuth, backupUpload.single('backup_file'), async (req, res) => {
+  const backupText = req.file ? req.file.buffer.toString('utf8') : req.body.backup_json || '';
   if (!backupText) return res.status(400).send('No backup data provided');
   let backup;
   try {
@@ -857,7 +1168,7 @@ app.post('/admin/restore', requireAuth, async (req, res) => {
   }
 
   const restoreOrder = [
-    'settings', 'announcements', 'events', 'membership_applications', 'members',
+    'settings', 'districts', 'announcements', 'events', 'membership_applications', 'members',
     'cards', 'volunteers', 'grievances', 'contact_requests', 'finance_records', 'audit_logs'
   ];
   const allowedTables = new Set([...restoreOrder, 'users']);
@@ -890,6 +1201,7 @@ app.post('/admin/restore', requireAuth, async (req, res) => {
     restoredRows.set(table, normalizedRows);
   }
 
+  await createDatabaseBackup('before-restore');
   try {
     await runQuery('BEGIN IMMEDIATE TRANSACTION');
     for (const table of [...restoreOrder].reverse()) {
@@ -919,7 +1231,9 @@ app.post('/admin/restore', requireAuth, async (req, res) => {
 app.get('/admin/announcements', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const announcements = await getAllRows('SELECT * FROM announcements ORDER BY created_at DESC');
-  res.render('admin-announcements', { settings, announcements, formatDate });
+  const success = req.query.saved === 'updated' ? 'Announcement updated.'
+    : req.query.saved === 'deleted' ? 'Announcement deleted.' : null;
+  res.render('admin-announcements', { settings, announcements, formatDate, success });
 });
 
 app.post('/admin/announcements', requireAuth, async (req, res) => {
@@ -932,10 +1246,39 @@ app.post('/admin/announcements', requireAuth, async (req, res) => {
   res.redirect('/admin/announcements');
 });
 
+app.post('/admin/announcements/:id/edit', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+  const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid announcement ID.');
+  if (!title || !content) return res.status(400).send('Announcement title and content are required.');
+  const existing = await getRow('SELECT id FROM announcements WHERE id = ?', [id]);
+  if (!existing) return res.status(404).send('Announcement not found.');
+  await runQuery(
+    'UPDATE announcements SET title = ?, content = ?, published = ?, updated_at = datetime("now") WHERE id = ?',
+    [title, content, req.body.published ? 1 : 0, id]
+  );
+  await addAuditLog('announcement_updated', `Announcement updated: ${title}`, 'announcement', id, req.session.user.username);
+  res.redirect('/admin/announcements?saved=updated');
+});
+
+app.post('/admin/announcements/:id/delete', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid announcement ID.');
+  const announcement = await getRow('SELECT title FROM announcements WHERE id = ?', [id]);
+  if (!announcement) return res.status(404).send('Announcement not found.');
+  await createDatabaseBackup('before-delete');
+  await runQuery('DELETE FROM announcements WHERE id = ?', [id]);
+  await addAuditLog('announcement_deleted', `Announcement deleted: ${announcement.title}`, 'announcement', id, req.session.user.username);
+  res.redirect('/admin/announcements?saved=deleted');
+});
+
 app.get('/admin/events', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const events = await getAllRows('SELECT * FROM events ORDER BY event_date DESC');
-  res.render('admin-events', { settings, events, formatDate });
+  const success = req.query.saved === 'updated' ? 'Event updated.'
+    : req.query.saved === 'deleted' ? 'Event deleted.' : null;
+  res.render('admin-events', { settings, events, formatDate, success });
 });
 
 app.post('/admin/events', requireAuth, async (req, res) => {
@@ -951,6 +1294,38 @@ app.post('/admin/events', requireAuth, async (req, res) => {
   await runQuery('INSERT INTO events (title, description, location, event_date, published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime("now"), datetime("now"))', [title, description, location || null, eventDate, published ? 1 : 0]);
   await addAuditLog('event_created', `Event created: ${title}`, 'event', title, req.session.user.username);
   res.redirect('/admin/events');
+});
+
+app.post('/admin/events/:id/edit', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+  const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+  const location = typeof req.body.location === 'string' ? req.body.location.trim() : '';
+  const eventDate = typeof req.body.event_date === 'string' ? req.body.event_date : '';
+  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDate) ? new Date(`${eventDate}T00:00:00Z`) : null;
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid event ID.');
+  if (!title || !description || !parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== eventDate) {
+    return res.status(400).send('Event title, description, and a valid date are required.');
+  }
+  const existing = await getRow('SELECT id FROM events WHERE id = ?', [id]);
+  if (!existing) return res.status(404).send('Event not found.');
+  await runQuery(
+    'UPDATE events SET title = ?, description = ?, location = ?, event_date = ?, published = ?, updated_at = datetime("now") WHERE id = ?',
+    [title, description, location || null, eventDate, req.body.published ? 1 : 0, id]
+  );
+  await addAuditLog('event_updated', `Event updated: ${title}`, 'event', id, req.session.user.username);
+  res.redirect('/admin/events?saved=updated');
+});
+
+app.post('/admin/events/:id/delete', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid event ID.');
+  const event = await getRow('SELECT title FROM events WHERE id = ?', [id]);
+  if (!event) return res.status(404).send('Event not found.');
+  await createDatabaseBackup('before-delete');
+  await runQuery('DELETE FROM events WHERE id = ?', [id]);
+  await addAuditLog('event_deleted', `Event deleted: ${event.title}`, 'event', id, req.session.user.username);
+  res.redirect('/admin/events?saved=deleted');
 });
 
 app.get('/admin/volunteers', requireAuth, async (req, res) => {
@@ -1002,15 +1377,18 @@ app.post('/admin/volunteers/:id/profile', requireAuth, upload.single('member_pho
   }
 
   const duplicate = await getRow(
-    'SELECT id FROM members WHERE phone = ? AND id != COALESCE(?, -1)',
-    [updated.phone, volunteer.member_id]
+    'SELECT id FROM members WHERE id != COALESCE(?, -1) AND (phone = ? OR (? != \'\' AND LOWER(email) = LOWER(?))) LIMIT 1',
+    [volunteer.member_id, updated.phone, updated.email, updated.email]
   );
   if (duplicate) {
     if (req.file) await removeUnusedMemberPhoto(`/uploads/${req.file.filename}`);
     return res.status(409).send('Another member already uses this phone number.');
   }
 
-  const newPhotoUrl = req.file ? `/uploads/${req.file.filename}` : volunteer.photo_url;
+  const newPhotoUrl = req.file
+    ? `/uploads/${req.file.filename}`
+    : req.body.clear_photo === '1' ? null : volunteer.photo_url;
+  if (volunteer.photo_url && volunteer.photo_url !== newPhotoUrl) await createDatabaseBackup('before-delete');
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {
     await runQuery(`
@@ -1044,7 +1422,7 @@ app.post('/admin/volunteers/:id/profile', requireAuth, upload.single('member_pho
     throw error;
   }
 
-  if (req.file && volunteer.photo_url !== newPhotoUrl) {
+  if (volunteer.photo_url !== newPhotoUrl) {
     await removeUnusedMemberPhoto(volunteer.photo_url);
   }
   if (volunteer.member_id) await syncMemberCsv();
@@ -1233,7 +1611,8 @@ app.get('/admin/grievances', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const notice = req.query.saved === 'deleted'
     ? 'Grievance deleted.'
-    : req.query.saved === 'updated' ? 'Grievance status updated.' : '';
+    : req.query.saved === 'updated' ? 'Grievance status updated.'
+      : req.query.saved === 'edited' ? 'Grievance details saved.' : '';
   res.render('admin-grievances', { settings, grievances, formatDate, notice });
 });
 
@@ -1242,7 +1621,8 @@ app.get('/admin/contacts', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const notice = req.query.saved === 'deleted'
     ? 'Contact request deleted.'
-    : req.query.saved === 'updated' ? 'Contact request status updated.' : '';
+    : req.query.saved === 'updated' ? 'Contact request status updated.'
+      : req.query.saved === 'edited' ? 'Contact request details saved.' : '';
   res.render('admin-contacts', { settings, contacts, formatDate, notice });
 });
 
@@ -1270,12 +1650,50 @@ async function updatePublicSubmissionStatus(req, res, table, recordType) {
   res.redirect(`${recordType === 'contact_request' ? '/admin/contacts' : '/admin/grievances'}?saved=updated`);
 }
 
+async function editPublicSubmission(req, res, table, recordType, route) {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid submission ID.');
+  const submission = await getRow(`SELECT id, ref FROM ${table} WHERE id = ?`, [id]);
+  if (!submission) return res.status(404).send('Submission not found.');
+  const fullName = typeof req.body.full_name === 'string' ? req.body.full_name.trim() : '';
+  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+  const district = typeof req.body.district === 'string' ? req.body.district.trim() : '';
+  const subject = typeof req.body.subject === 'string' ? req.body.subject.trim() : '';
+  const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+  const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+  if (!fullName || !subject || !message || (recordType === 'grievance' && !phone)) {
+    return res.status(400).send('Name, subject, message, and grievance phone are required.');
+  }
+
+  if (recordType === 'grievance') {
+    await runQuery(
+      'UPDATE grievances SET full_name = ?, phone = ?, district = ?, subject = ?, message = ? WHERE id = ?',
+      [fullName, phone, district || null, subject, message, id]
+    );
+  } else {
+    await runQuery(
+      'UPDATE contact_requests SET full_name = ?, email = ?, phone = ?, subject = ?, message = ? WHERE id = ?',
+      [fullName, email || null, phone || null, subject, message, id]
+    );
+  }
+  await addAuditLog(`${recordType}_updated`, `${recordType === 'contact_request' ? 'Contact request' : 'Grievance'} ${submission.ref} details updated`, recordType, submission.ref, req.session.user.username);
+  res.redirect(`${route}?saved=edited`);
+}
+
 app.post('/admin/grievances/:id/status', requireAuth, async (req, res) => {
   await updatePublicSubmissionStatus(req, res, 'grievances', 'grievance');
 });
 
+app.post('/admin/grievances/:id/edit', requireAuth, async (req, res) => {
+  await editPublicSubmission(req, res, 'grievances', 'grievance', '/admin/grievances');
+});
+
 app.post('/admin/contacts/:id/status', requireAuth, async (req, res) => {
   await updatePublicSubmissionStatus(req, res, 'contact_requests', 'contact_request');
+});
+
+app.post('/admin/contacts/:id/edit', requireAuth, async (req, res) => {
+  await editPublicSubmission(req, res, 'contact_requests', 'contact_request', '/admin/contacts');
 });
 
 async function deletePublicSubmission(req, res, table, recordType, displayName, route) {
@@ -1283,6 +1701,7 @@ async function deletePublicSubmission(req, res, table, recordType, displayName, 
   if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid submission ID.');
 
   let submission;
+  await createDatabaseBackup('before-delete');
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {
     const fields = recordType === 'volunteer' ? 'id, ref, photo_url' : 'id, ref';
@@ -1350,13 +1769,34 @@ app.use((error, req, res, next) => {
 
   console.error('Request failed:', error);
   const isUploadError = error instanceof multer.MulterError || error.message === 'Only JPG, PNG, and WEBP images are allowed.';
-  const status = isUploadError ? 400 : 500;
-  const message = isUploadError ? error.message : 'An unexpected server error occurred.';
+  const isBackupUploadError = error.message === 'Backup upload must be a JSON file.';
+  const status = isUploadError || isBackupUploadError ? 400 : 500;
+  const message = isUploadError || isBackupUploadError ? error.message : 'An unexpected server error occurred.';
   res.status(status).type('text/plain').send(message);
 });
 
-initDatabase().then(async () => {
+async function createScheduledBackupIfDue() {
+  const backups = await listDatabaseBackups();
+  const mostRecentScheduled = backups.find(backup => backup.filename.startsWith('ptk-daily-') || backup.filename.startsWith('ptk-startup-'));
+  if (mostRecentScheduled && Date.now() - mostRecentScheduled.createdAt.getTime() < 24 * 60 * 60 * 1000) return;
+  const backup = await createDatabaseBackup(mostRecentScheduled ? 'daily' : 'startup');
+  console.log(`Automatic database backup created: ${backup.filename}`);
+}
+
+const startup = process.env.NODE_ENV === 'production' && !persistentStorageConfigured
+  ? Promise.reject(new Error('Refusing to start: production database, automatic backups, uploads, and CSV must all use the configured persistent storage root.'))
+  : initDatabase();
+
+startup.then(async () => {
   await syncMemberCsv();
+  if (!persistentStorageConfigured) {
+    console.warn('Persistent storage is not configured. Production database, backups, uploads, and CSV export may be lost on restart or redeploy; configure DB_PATH=/var/data/ptk.db, BACKUP_DIR=/var/data/backups, UPLOAD_DIR=/var/data/uploads, and MEMBER_CSV_PATH=/var/data/ptk-members.csv on a mounted Render disk.');
+  }
+  await createScheduledBackupIfDue();
+  const backupTimer = setInterval(() => {
+    createScheduledBackupIfDue().catch(error => console.error('Automatic database backup failed:', error));
+  }, 6 * 60 * 60 * 1000);
+  backupTimer.unref();
   app.listen(port, () => {
     console.log(`PTK platform running on http://localhost:${port}`);
   });

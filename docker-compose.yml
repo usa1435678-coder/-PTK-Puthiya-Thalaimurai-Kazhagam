@@ -8,7 +8,11 @@ services:
       - NODE_ENV=production
       - SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET in .env before starting}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - DB_PATH=/app/data/ptk.db
+      - BACKUP_DIR=/app/data/backups
+      - PERSISTENT_STORAGE_ROOT=/app/data
+      - UPLOAD_DIR=/app/data/uploads
+      - MEMBER_CSV_PATH=/app/data/ptk-members.csv
     volumes:
       - ./data:/app/data
-      - ./public/uploads:/app/public/uploads
     restart: unless-stopped

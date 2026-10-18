@@ -10,6 +10,8 @@ const path = require('path');
 
 const defaultDataDir = path.join(__dirname, 'data');
 const databasePath = process.env.DB_PATH || path.join(defaultDataDir, 'ptk.db');
+const backupDirectory = process.env.BACKUP_DIR || path.join(path.dirname(databasePath), 'backups');
+const uploadDirectory = process.env.UPLOAD_DIR || path.join(__dirname, 'public', 'uploads');
 
 fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
@@ -47,6 +49,105 @@ function csvEscape(value) {
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
 
+async function copyDirectoryContents(sourceDirectory, destinationDirectory, skipExisting = false) {
+  await fs.promises.mkdir(destinationDirectory, { recursive: true, mode: 0o700 });
+  let entries;
+  try {
+    entries = await fs.promises.readdir(sourceDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const source = path.join(sourceDirectory, entry.name);
+    const destination = path.join(destinationDirectory, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`Refusing to back up symbolic link ${source}`);
+    if (entry.isDirectory()) {
+      await copyDirectoryContents(source, destination, skipExisting);
+    } else if (entry.isFile()) {
+      try {
+        await fs.promises.copyFile(source, destination, skipExisting ? fs.constants.COPYFILE_EXCL : 0);
+      } catch (error) {
+        if (!skipExisting || error.code !== 'EEXIST') throw error;
+      }
+    } else {
+      throw new Error(`Refusing to back up unsupported file type ${source}`);
+    }
+  }
+}
+
+async function restoreBackupUploads(filename) {
+  if (!/^ptk-(startup|daily|before-restore|before-delete|manual)-.+\.sqlite$/.test(filename)) {
+    throw new Error('Invalid database backup filename.');
+  }
+  const sourceDirectory = path.join(backupDirectory, `${filename}.uploads`);
+  await copyDirectoryContents(sourceDirectory, uploadDirectory, true);
+}
+
+let activeBackupPromise = null;
+
+async function createDatabaseBackup(reason = 'manual') {
+  if (!['startup', 'daily', 'before-restore', 'before-delete', 'manual'].includes(reason)) {
+    throw new Error('Unsupported database backup reason.');
+  }
+  if (activeBackupPromise) return activeBackupPromise;
+
+  activeBackupPromise = (async () => {
+    await fs.promises.mkdir(backupDirectory, { recursive: true, mode: 0o700 });
+    await fs.promises.chmod(backupDirectory, 0o700);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `ptk-${reason}-${timestamp}-${crypto.randomBytes(6).toString('hex')}.sqlite`;
+    const destination = path.join(backupDirectory, filename);
+    const temporaryDestination = `${destination}.tmp`;
+    const uploadSnapshot = path.join(backupDirectory, `${filename}.uploads`);
+    const temporaryUploadSnapshot = `${uploadSnapshot}.tmp`;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const backup = db.backup(temporaryDestination, error => {
+          if (error) return reject(error);
+          backup.step(-1, stepError => stepError ? reject(stepError) : resolve());
+        });
+      });
+      await copyDirectoryContents(uploadDirectory, temporaryUploadSnapshot);
+      await fs.promises.chmod(temporaryDestination, 0o600);
+      await fs.promises.rename(temporaryUploadSnapshot, uploadSnapshot);
+      await fs.promises.rename(temporaryDestination, destination);
+      return { filename, path: destination };
+    } catch (error) {
+      for (const incompletePath of [temporaryDestination, temporaryUploadSnapshot, uploadSnapshot]) {
+        try {
+          await fs.promises.rm(incompletePath, { recursive: true, force: true });
+        } catch (cleanupError) {
+          if (cleanupError.code !== 'ENOENT') {
+            console.error('Failed to remove incomplete database backup:', cleanupError);
+          }
+        }
+      }
+      throw error;
+    }
+  })();
+
+  try {
+    return await activeBackupPromise;
+  } finally {
+    activeBackupPromise = null;
+  }
+}
+
+async function listDatabaseBackups() {
+  await fs.promises.mkdir(backupDirectory, { recursive: true, mode: 0o700 });
+  await fs.promises.chmod(backupDirectory, 0o700);
+  const filenames = await fs.promises.readdir(backupDirectory);
+  const backupFiles = filenames.filter(filename => /^ptk-(startup|daily|before-restore|before-delete|manual)-.+\.sqlite$/.test(filename));
+  const backups = await Promise.all(backupFiles.map(async filename => {
+    const stats = await fs.promises.stat(path.join(backupDirectory, filename));
+    return stats.isFile() ? { filename, size: stats.size, createdAt: stats.mtime } : null;
+  }));
+  return backups.filter(Boolean).sort((left, right) => right.createdAt - left.createdAt);
+}
+
 async function addAuditLog(action, details, recordType = 'system', recordId = '', actor = 'system') {
   return runQuery(
     `INSERT INTO audit_logs (actor, action, record_type, record_id, details, created_at)
@@ -62,6 +163,13 @@ async function getSettings() {
 
 async function initDatabase() {
   await runQuery('PRAGMA foreign_keys = ON');
+  await runQuery('PRAGMA busy_timeout = 10000');
+  await runQuery('PRAGMA synchronous = FULL');
+  const journalMode = await getRow('PRAGMA journal_mode = WAL');
+  if (!journalMode || String(journalMode.journal_mode).toLowerCase() !== 'wal') {
+    throw new Error('SQLite could not enable write-ahead logging for durable database writes.');
+  }
+  await fs.promises.chmod(databasePath, 0o600);
 
   const schema = [
     `CREATE TABLE IF NOT EXISTS settings (
@@ -234,10 +342,10 @@ async function initDatabase() {
     card_red: '#A8202B',
     card_yellow: '#F2C744',
     card_green: '#16734B',
-    logo_url: '',
-    leader_photo_url: '',
-    flag_url: '',
-    signature_url: '',
+    logo_url: '/branding/ptk-logo.jpeg',
+    leader_photo_url: '/branding/ptk-leader.jpeg',
+    flag_url: '/branding/ptk-flag.png',
+    signature_url: '/branding/ptk-signature.png',
     hero_background_url: '',
     card_background_url: '',
     about_text: '',
@@ -270,14 +378,14 @@ async function initDatabase() {
 
   const existingAdmin = await getRow('SELECT id, password_hash FROM users WHERE username = ?', ['admin']);
   const configuredAdminPassword = process.env.ADMIN_PASSWORD;
-  if (configuredAdminPassword && configuredAdminPassword.length < 16) {
-    throw new Error('ADMIN_PASSWORD must be at least 16 characters long.');
-  }
-  if (configuredAdminPassword || !existingAdmin || bcrypt.compareSync('admin123', existingAdmin.password_hash)) {
+  if (!existingAdmin || bcrypt.compareSync('admin123', existingAdmin.password_hash)) {
+    if (configuredAdminPassword && configuredAdminPassword.length < 16) {
+      throw new Error('ADMIN_PASSWORD must be at least 16 characters long.');
+    }
     const password = configuredAdminPassword || crypto.randomBytes(24).toString('base64url');
     const passwordHash = bcrypt.hashSync(password, 12);
     const credentialsPath = path.join(path.dirname(databasePath), 'admin-credentials.txt');
-    if (!configuredAdminPassword) {
+    if (!existingAdmin && !configuredAdminPassword) {
       await fs.promises.writeFile(credentialsPath, `Username: admin\nPassword: ${password}\n`, { mode: 0o600 });
     }
     if (existingAdmin) {
@@ -295,7 +403,13 @@ async function initDatabase() {
 
 module.exports = {
   db,
+  databasePath,
+  backupDirectory,
+  uploadDirectory,
   initDatabase,
+  createDatabaseBackup,
+  listDatabaseBackups,
+  restoreBackupUploads,
   getSettings,
   getAllRows,
   getRow,
