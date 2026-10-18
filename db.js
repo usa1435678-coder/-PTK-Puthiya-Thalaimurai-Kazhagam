@@ -60,6 +60,48 @@ async function getSettings() {
   return Object.fromEntries(rows.map(row => [row.setting_key, row.setting_value]));
 }
 
+async function ensureDatabaseFileSecurity() {
+  try {
+    // set restrictive permissions on DB file (owner read/write)
+    await fs.promises.chmod(databasePath, 0o600).catch(() => {});
+    // set permissions for admin credentials file if exists
+    const credentialsPath = path.join(path.dirname(databasePath), 'admin-credentials.txt');
+    if (fs.existsSync(credentialsPath)) {
+      await fs.promises.chmod(credentialsPath, 0o600).catch(() => {});
+    }
+  } catch (err) {
+    // Non-fatal; permission setting may fail on some filesystems
+    console.warn('Warning: could not set strict file permissions for database or credentials:', err.message || err);
+  }
+}
+
+async function makeBackup() {
+  try {
+    const backupsDir = path.join(path.dirname(databasePath), 'backups');
+    await fs.promises.mkdir(backupsDir, { recursive: true });
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, '-');
+    const dest = path.join(backupsDir, `ptk-db-backup-${timestamp}.db`);
+    await fs.promises.copyFile(databasePath, dest);
+    try { await fs.promises.chmod(dest, 0o600); } catch {}
+    console.log(`Database backup created: ${dest}`);
+  } catch (err) {
+    console.error('Database backup failed:', err);
+  }
+}
+
+let backupIntervalHandle = null;
+function startAutoBackups(intervalMs = 6 * 60 * 60 * 1000) { // default 6 hours
+  // create an initial backup immediately, then schedule
+  makeBackup();
+  if (backupIntervalHandle) clearInterval(backupIntervalHandle);
+  backupIntervalHandle = setInterval(() => {
+    makeBackup();
+  }, Number(process.env.DB_BACKUP_INTERVAL_MS || intervalMs));
+  // Do not keep Node from exiting only for backups
+  if (backupIntervalHandle && typeof backupIntervalHandle.unref === 'function') backupIntervalHandle.unref();
+}
+
 async function initDatabase() {
   await runQuery('PRAGMA foreign_keys = ON');
 
@@ -290,6 +332,10 @@ async function initDatabase() {
     }
   }
 
+  // Ensure file permissions and create an initial backup. Start periodic backups so the database is preserved.
+  await ensureDatabaseFileSecurity();
+  startAutoBackups();
+
   console.log(`PTK database ready: ${databasePath}`);
 }
 
@@ -301,5 +347,7 @@ module.exports = {
   getRow,
   runQuery,
   csvEscape,
-  addAuditLog
+  addAuditLog,
+  makeBackup,
+  startAutoBackups
 };
