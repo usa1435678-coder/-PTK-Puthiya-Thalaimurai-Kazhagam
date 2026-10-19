@@ -91,6 +91,27 @@
                     <td><%= application.membership_category %></td>
                     <td><span class="member-status <%= application.status %>"><span class="lang-en"><%= application.status === 'pending' ? 'Pending' : 'Rejected' %></span><span class="lang-ta"><%= application.status === 'pending' ? 'நிலுவை' : 'நிராகரிக்கப்பட்டது' %></span></span></td>
                     <td class="member-actions">
+                      <details class="member-edit">
+                        <summary><span class="lang-en">Edit application</span><span class="lang-ta">விண்ணப்பத்தைத் திருத்து</span></summary>
+                        <form method="POST" action="/admin/application/<%= application.id %>/edit" enctype="multipart/form-data">
+                          <div class="member-edit-grid">
+                            <label>Full name<input name="full_name" value="<%= application.full_name %>" required /></label>
+                            <label>Tamil name<input name="tamil_name" value="<%= application.tamil_name || '' %>" /></label>
+                            <label>Phone<input name="phone" value="<%= application.phone %>" required /></label>
+                            <label>Email<input name="email" type="email" value="<%= application.email || '' %>" /></label>
+                            <label>District<input name="district" value="<%= application.district %>" required /></label>
+                            <label>Local unit<input name="local_unit" value="<%= application.local_unit %>" required /></label>
+                            <label>Category<input name="membership_category" value="<%= application.membership_category %>" required /></label>
+                          </div>
+                          <label>Full address<textarea name="address"><%= application.address || '' %></textarea></label>
+                          <% if (application.photo_url) { %>
+                            <img class="asset-preview" src="<%= application.photo_url %>" alt="Applicant photo" />
+                            <label><input type="checkbox" name="clear_photo" value="1" /> Remove current photo</label>
+                          <% } %>
+                          <label>Replace photo<input type="file" name="member_photo" accept="image/jpeg,image/png,image/webp" /></label>
+                          <button class="btn btn-primary" type="submit">Save application</button>
+                        </form>
+                      </details>
                       <form method="POST" action="/admin/application/<%= application.id %>/status">
                         <input type="hidden" name="return_to" value="members" />
                         <input type="hidden" name="status" value="approved" />
@@ -103,6 +124,10 @@
                           <button class="btn btn-secondary" type="submit"><span class="lang-en">Reject</span><span class="lang-ta">நிராகரி</span></button>
                         </form>
                       <% } %>
+                      <form method="POST" action="/admin/application/<%= application.id %>/delete" onsubmit="return confirm(document.body.dataset.language === 'ta' ? 'இந்த விண்ணப்பத்தை நிரந்தரமாக நீக்கவா?' : 'Permanently delete this application?')">
+                      <input type="hidden" name="return_to" value="members" />
+                      <button class="btn btn-secondary" type="submit"><span class="lang-en">Delete application</span><span class="lang-ta">விண்ணப்பத்தை நீக்கு</span></button>
+                      </form>
                     </td>
                   </tr>
                 <% }) %>
@@ -174,6 +199,7 @@
                           <label><span class="lang-en">Full address — required</span><span class="lang-ta">முழு முகவரி — அவசியம்</span><textarea name="address" required><%= member.address || '' %></textarea></label>
                           <label><span class="lang-en">Member photo (JPG/PNG/WEBP, max 5 MB)</span><span class="lang-ta">உறுப்பினர் படம் (JPG/PNG/WEBP, அதிகபட்சம் 5 MB)</span>
                             <% if (member.photo_url) { %><img class="asset-preview" src="<%= member.photo_url %>" alt="Current member photo" /><% } %>
+                            <% if (member.photo_url) { %><span><input type="checkbox" name="clear_photo" value="1" /> Remove current photo</span><% } %>
                             <input type="file" name="member_photo" accept="image/jpeg,image/png,image/webp" />
                           </label>
                           <button class="btn btn-primary" type="submit"><span class="lang-en">Save changes</span><span class="lang-ta">மாற்றங்களைச் சேமி</span></button>

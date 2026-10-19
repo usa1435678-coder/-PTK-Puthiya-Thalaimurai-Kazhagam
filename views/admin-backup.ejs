@@ -31,10 +31,43 @@
           <div class="eyebrow">System settings</div>
           <h2>Security, backups, and application controls</h2>
         </div>
+        <% if (persistentStorageConfigured) { %>
+          <div class="notice success">The database, automatic backups, uploads, and CSV export paths are under <code><%= persistentStorageRoot %></code>. Verify that a persistent disk is actually attached at this mount path, keep it attached, and continue downloading backups regularly.</div>
+        <% } else { %>
+          <div class="notice error">
+            <strong>Data may be lost on a production restart or redeploy.</strong>
+            The database, automatic backups, uploaded images, and CSV export are not all configured under the persistent mount path.
+            Keep external backups, and configure a persistent volume actually mounted at <code><%= persistentStorageRoot %></code> with
+            <code>DB_PATH=/var/data/ptk.db</code>, <code>UPLOAD_DIR=/var/data/uploads</code>, and
+            <code>MEMBER_CSV_PATH=/var/data/ptk-members.csv</code>.
+            Render Free web services do not support persistent disks; adding a disk requires a paid plan.
+          </div>
+        <% } %>
+        <% if (success) { %><div class="notice success"><%= success %></div><% } %>
 
         <div class="dashboard-panel">
-          <h3>Administrator PIN</h3>
-          <p>This PIN protects admin pages in this browser only. It is not server-side authentication and does not replace your administrator username and password.</p>
+          <h3>Change administrator password</h3>
+          <p>Only an authenticated administrator can change this password. Password changes are stored in the database and are not reset from <code>ADMIN_PASSWORD</code> when the app restarts.</p>
+          <form method="POST" action="/admin/settings/password">
+            <div style="margin-bottom: 14px;">
+              <label for="current-password">Current password</label>
+              <input id="current-password" name="current_password" type="password" autocomplete="current-password" required />
+            </div>
+            <div style="margin-bottom: 14px;">
+              <label for="new-password">New password (at least 16 characters)</label>
+              <input id="new-password" name="new_password" type="password" minlength="16" autocomplete="new-password" required />
+            </div>
+            <div style="margin-bottom: 14px;">
+              <label for="confirm-password">Confirm new password</label>
+              <input id="confirm-password" name="confirm_password" type="password" minlength="16" autocomplete="new-password" required />
+            </div>
+            <button class="btn btn-primary" type="submit">Change password</button>
+          </form>
+        </div>
+
+        <div class="dashboard-panel">
+          <h3>Browser-only PIN</h3>
+          <p>This optional PIN is stored only in this browser. It is not server-side authentication and does not replace your administrator username and password.</p>
           <form id="admin-pin-form">
             <div id="admin-pin-current-field" style="margin-bottom: 14px;" hidden>
               <label for="admin-pin-current">Current PIN</label>
@@ -56,17 +89,58 @@
 
         <div class="dashboard-panel">
           <h3>Export database backup</h3>
-          <p>Download a complete JSON backup of all platform data. This file can be used to restore data later.</p>
+          <p>Download a consistent JSON snapshot of all platform records, settings, and district data. Admin password hashes are excluded.</p>
           <a class="btn btn-primary" href="/admin/backup">Download backup</a>
         </div>
 
         <div class="dashboard-panel" style="margin-top: 24px;">
+          <h3>Automatic full database backups</h3>
+          <p>The app makes a full SQLite snapshot and copies the uploaded images at least every 24 hours and before an administrator restores or deletes records. Snapshots include every database table, including administrator accounts. They are kept on the persistent disk and are never automatically deleted. Only signed-in administrators can download or restore them.</p>
+          <p><strong><%= automaticBackupCount %></strong> retained snapshot(s). Keep an additional copy somewhere outside this service; a persistent disk is not an independent backup.</p>
+          <form method="POST" action="/admin/automatic-backups/create" style="margin-bottom: 16px;">
+            <button class="btn btn-primary" type="submit">Create full snapshot now</button>
+          </form>
+          <% if (automaticBackups.length) { %>
+            <div style="overflow-x: auto;">
+              <table>
+                <thead><tr><th>Snapshot</th><th>Created</th><th>Database size</th><th>Actions</th></tr></thead>
+                <tbody>
+                  <% automaticBackups.forEach(backup => { %>
+                    <tr>
+                      <td><code><%= backup.filename %></code></td>
+                      <td><%= new Date(backup.createdAt).toLocaleString() %></td>
+                      <td><%= (backup.size / 1024 / 1024).toFixed(2) %> MB</td>
+                      <td>
+                        <a href="/admin/automatic-backups/<%= encodeURIComponent(backup.filename) %>">Download full database</a>
+                        <form method="POST" action="/admin/automatic-backups/<%= encodeURIComponent(backup.filename) %>/restore" style="display:inline;" onsubmit="return confirm('Restore the complete database and uploaded files? Current data will first be backed up. This also restores the admin accounts and password from this snapshot. Continue?')">
+                          <button class="btn btn-secondary" type="submit">Restore snapshot</button>
+                        </form>
+                      </td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+            <% if (automaticBackupCount > automaticBackups.length) { %>
+              <p>Showing the newest 20 snapshots. Older snapshots remain in the backup directory and are not deleted automatically.</p>
+            <% } %>
+          <% } else { %>
+            <p>No automatic database snapshot has been created yet.</p>
+          <% } %>
+        </div>
+
+        <div class="dashboard-panel" style="margin-top: 24px;">
           <h3>Restore from backup</h3>
-          <p>Upload a previously exported backup file. This will replace existing records with data from the backup.</p>
-          <form method="POST" action="/admin/restore">
+          <p>Upload a previously exported JSON backup file. This restores database records only; uploaded images and administrator accounts are not in this export. Use a full automatic snapshot above to restore the complete database and images.</p>
+          <form method="POST" action="/admin/restore" enctype="multipart/form-data">
             <div style="margin-bottom: 16px;">
-              <label>Paste JSON backup content</label>
-              <textarea name="backup_json" style="min-height: 200px; font-family: monospace;"></textarea>
+              <label for="backup-file">Choose a downloaded PTK JSON backup (max 10 MB)</label>
+              <input id="backup-file" type="file" name="backup_file" accept=".json,application/json" />
+            </div>
+            <div style="margin-bottom: 16px;">
+              <label for="backup-json">Or paste JSON backup content</label>
+              <textarea id="backup-json" name="backup_json" style="min-height: 200px; font-family: monospace;"></textarea>
+              <p>Restoring replaces data in the supported tables. Admin accounts and uploaded files are not restored.</p>
             </div>
             <div>
               <button class="btn btn-primary" type="submit" onclick="return confirm(window.ptkTranslate('This will replace existing data. Continue?'))">Restore from backup</button>
@@ -77,8 +151,8 @@
         <div class="dashboard-panel" style="margin-top: 24px;">
           <h3>Backup information</h3>
           <ul>
-            <li>Backups include all settings, members, applications, announcements, events, and audit logs</li>
-            <li>Admin user accounts are NOT included in backups for security</li>
+            <li>Backups include all settings, districts, member records, applications, cards, volunteer registrations, contact and grievance submissions, announcements, events, finance records, and audit logs</li>
+            <li>Admin accounts and uploaded images are excluded; the current administrator accounts are preserved during restore</li>
             <li>Restore will clear existing data for each table and load from backup</li>
             <li>Keep backups in a secure location</li>
             <li>Test restore on a copy of your data first</li>

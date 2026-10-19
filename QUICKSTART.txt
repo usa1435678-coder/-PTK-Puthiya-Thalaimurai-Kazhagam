@@ -1,0 +1,36 @@
+PTK DIGITAL PLATFORM — QUICK START
+=================================
+
+RUN ON WINDOWS
+-------------
+1. Install Node.js 22 or newer from https://nodejs.org/
+2. Extract the website ZIP into a writable folder.
+3. Double-click START-WINDOWS.bat.
+4. Keep the "PTK Website Server" window open while using the website.
+5. Open http://localhost:3000/admin/login
+
+LOCAL FIRST-RUN ADMIN
+---------------------
+Username: admin
+Password: PTKadmin@2026
+
+Change this password in Admin > System settings. These credentials are for first-run setup only. Change the password after
+local development only; production never creates this default account.
+
+PUBLIC SITE AND ADMIN
+---------------------
+Public site: http://localhost:3000/
+Admin sign-in: http://localhost:3000/admin/login
+Health check: http://localhost:3000/healthz
+
+The admin centre manages branding and images, website content, membership
+applications, member cards, announcements, events, inquiries, reports, and
+backups. A membership card shows red at the top, yellow in the middle, and
+green at the bottom together on the same card.
+
+PRODUCTION
+----------
+Read DEPLOYMENT.md. Production requires HTTPS, PUBLIC_BASE_URL, a unique
+SESSION_SECRET, persistent storage, and a unique first administrator
+password. Use a single application instance with the current SQLite setup.
+Do not put production records, backups, or credentials in a public folder.

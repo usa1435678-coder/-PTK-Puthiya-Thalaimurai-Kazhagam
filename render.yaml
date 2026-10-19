@@ -4,6 +4,9 @@ services:
     runtime: docker
     plan: starter
     healthCheckPath: /healthz
+    # Persistent disk keeps the SQLite database, backups, uploads and the member
+    # CSV across deploys and restarts. Data on this disk is never deleted by a
+    # redeploy.
     disk:
       name: ptk-data
       mountPath: /var/data
@@ -13,11 +16,21 @@ services:
         value: production
       - key: DB_PATH
         value: /var/data/ptk.db
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      - key: PERSISTENT_STORAGE_ROOT
+        value: /var/data
       - key: UPLOAD_DIR
         value: /var/data/uploads
       - key: MEMBER_CSV_PATH
         value: /var/data/ptk-members.csv
       - key: SESSION_SECRET
         generateValue: true
-      - key: ADMIN_PASSWORD
-        generateValue: true
+      # First-run administrator login. Change the password from the dashboard
+      # after the first sign-in. If you prefer Render to generate the secret,
+      # remove the value below and switch it to `generateValue: true`, then read
+      # it from Dashboard -> your service -> Environment.
+      - key: INITIAL_ADMIN_USERNAME
+        value: admin
+      - key: INITIAL_ADMIN_PASSWORD
+        value: PTKadmin@2026

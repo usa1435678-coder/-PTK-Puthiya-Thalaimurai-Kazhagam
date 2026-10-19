@@ -30,6 +30,7 @@
           <div class="eyebrow">Announcements</div>
           <h2>Create and publish updates</h2>
         </div>
+        <% if (success) { %><div class="notice success"><%= success %></div><% } %>
         <div class="form-shell">
           <form method="POST" action="/admin/announcements">
             <div>
@@ -58,14 +59,31 @@
                 <th>Title</th>
                 <th>Published</th>
                 <th>Date</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               <% announcements.forEach((item) => { %>
                 <tr>
-                  <td><%= item.title %></td>
+                  <td>
+                    <strong><%= item.title %></strong>
+                    <details style="margin-top: 8px;">
+                      <summary>Edit announcement</summary>
+                      <form method="POST" action="/admin/announcements/<%= item.id %>/edit" style="margin-top: 12px;">
+                        <label>Title<input name="title" value="<%= item.title %>" required /></label>
+                        <label>Content<textarea name="content" required><%= item.content %></textarea></label>
+                        <label class="checkbox-row"><input type="checkbox" name="published" value="1" <%= item.published ? 'checked' : '' %> /> Published</label>
+                        <button class="btn btn-primary" type="submit">Save changes</button>
+                      </form>
+                    </details>
+                  </td>
                   <td><%= item.published ? 'Yes' : 'No' %></td>
                   <td><%= formatDate(item.created_at) %></td>
+                  <td>
+                    <form method="POST" action="/admin/announcements/<%= item.id %>/delete" onsubmit="return confirm('Permanently delete this announcement?')">
+                      <button class="btn btn-secondary" type="submit">Delete</button>
+                    </form>
+                  </td>
                 </tr>
               <% }) %>
             </tbody>
