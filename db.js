@@ -385,31 +385,32 @@ async function initDatabase() {
   const adminUsername = (process.env.INITIAL_ADMIN_USERNAME || 'admin').trim() || 'admin';
   const existingAdmin = await getRow('SELECT id, password_hash FROM users WHERE username = ?', [adminUsername])
     || await getRow('SELECT id, password_hash FROM users WHERE username = ?', ['admin']);
-  const configuredAdminPassword = process.env.INITIAL_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD;
-  // Documented first-run password. It is only applied when no password is supplied
-  // through the environment and the administrator account does not exist yet (or still
-  // uses the legacy "admin123" default). Change it from the dashboard after first login.
+  const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD || '';
+  const legacyAdminPassword = process.env.ADMIN_PASSWORD || '';
+  const configuredAdminPassword = initialAdminPassword || legacyAdminPassword;
+  // Documented first-run password so the operator can always sign in.
   const DEFAULT_ADMIN_PASSWORD = 'PTKadmin@2026';
   if (configuredAdminPassword && configuredAdminPassword.length < 12) {
     throw new Error('The initial administrator password (INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD) must be at least 12 characters long.');
   }
   const forceReset = String(process.env.FORCE_ADMIN_RESET || '').toLowerCase() === 'true';
   const legacyDefault = existingAdmin ? bcrypt.compareSync('admin123', existingAdmin.password_hash) : false;
-  // One-time migration marker (v2). The first time this bootstrap runs against a database
-  // it resets the administrator password to the documented default so the operator is never
-  // locked out by an unknown password left behind by an earlier build. Once the marker
-  // exists, later password changes made from the dashboard are preserved.
-  const bootstrapMarkerKey = 'admin_password_bootstrap_v2';
+  // One-time migration marker (v3). The first time this bootstrap runs against a database it
+  // (re)sets the administrator password so the operator is never locked out by an unknown
+  // password left behind by an earlier build. Once the marker exists, dashboard changes are
+  // preserved and the password only changes again on an explicit FORCE_ADMIN_RESET.
+  const bootstrapMarkerKey = 'admin_password_bootstrap_v3';
   const existingMarker = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [bootstrapMarkerKey]);
   const firstBootstrapRun = !existingMarker;
   const shouldApplyPassword = !existingAdmin || forceReset || legacyDefault || firstBootstrapRun;
   if (shouldApplyPassword) {
-    // A configured password is honored when creating a brand-new account, when upgrading an
-    // account that still uses the legacy default, or on an explicit reset. When migrating an
-    // existing account that has an unknown password, the documented default is used instead
-    // so the operator can always sign in.
-    const useConfigured = !existingAdmin || forceReset || legacyDefault;
-    const password = useConfigured ? (configuredAdminPassword || DEFAULT_ADMIN_PASSWORD) : DEFAULT_ADMIN_PASSWORD;
+    // A deliberately-set INITIAL_ADMIN_PASSWORD is honored. The legacy ADMIN_PASSWORD is only
+    // honored on an explicit FORCE_ADMIN_RESET because it is often an auto-generated value the
+    // operator never saw. Otherwise the documented default is used so sign-in always works.
+    let password;
+    if (initialAdminPassword) password = initialAdminPassword;
+    else if (forceReset && legacyAdminPassword) password = legacyAdminPassword;
+    else password = DEFAULT_ADMIN_PASSWORD;
     const passwordHash = bcrypt.hashSync(password, 12);
     if (existingAdmin) {
       await runQuery('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existingAdmin.id]);
@@ -422,7 +423,7 @@ async function initDatabase() {
     const credentialsPath = path.join(path.dirname(databasePath), 'admin-credentials.txt');
     await fs.promises.writeFile(
       credentialsPath,
-      `Username: ${adminUsername}\nPassword: ${password}\nSource: ${useConfigured && configuredAdminPassword ? 'INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD environment variable' : 'documented first-run default (change it after logging in)'}\n`,
+      `Username: ${adminUsername}\nPassword: ${password}\nSource: ${password === DEFAULT_ADMIN_PASSWORD ? 'documented first-run default (change it after logging in)' : 'INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD environment variable'}\n`,
       { mode: 0o600 }
     );
   }

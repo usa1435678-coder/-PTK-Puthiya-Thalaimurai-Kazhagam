@@ -13,8 +13,9 @@ First-run login:
   Password: PTKadmin@2026
 
 Notes:
-  * On a brand-new database, INITIAL_ADMIN_PASSWORD (or ADMIN_PASSWORD) sets the
-    password if you provide one; otherwise the default above is used.
+  * If you set INITIAL_ADMIN_PASSWORD, that value is used as the password.
+    Otherwise the documented default above is used (a legacy ADMIN_PASSWORD is
+    only honored together with FORCE_ADMIN_RESET=true).
   * On the first run against an existing database the account is reset once to
     the default above so you are never locked out by an unknown password. After
     that, changes you make from the dashboard persist across restarts/redeploys.
