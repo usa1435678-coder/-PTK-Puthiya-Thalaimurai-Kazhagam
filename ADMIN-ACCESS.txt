@@ -13,12 +13,13 @@ First-run login:
   Password: PTKadmin@2026
 
 Notes:
-  * If your Render service defines an INITIAL_ADMIN_PASSWORD (or ADMIN_PASSWORD)
-    environment variable, that value is used instead of the default above. Read
-    it from Render Dashboard -> your service -> Environment.
-  * The password is only seeded the first time the database is created (or while
-    the account still uses the legacy "admin123" default). Changing it from the
-    dashboard persists across restarts and redeploys.
+  * On a brand-new database, INITIAL_ADMIN_PASSWORD (or ADMIN_PASSWORD) sets the
+    password if you provide one; otherwise the default above is used.
+  * On the first run against an existing database the account is reset once to
+    the default above so you are never locked out by an unknown password. After
+    that, changes you make from the dashboard persist across restarts/redeploys.
+  * To force a reset back to the configured/default password, set
+    FORCE_ADMIN_RESET=true once and redeploy.
   * Change the initial password from Admin dashboard > System settings before
     using the site beyond testing. Keep your database and backups private.
 

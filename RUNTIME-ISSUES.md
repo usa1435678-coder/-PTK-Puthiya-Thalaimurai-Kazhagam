@@ -24,7 +24,7 @@ Use the same hostname and port consistently (for example, `localhost` rather tha
 
 ## Startup warnings in production
 
-The app always starts, but logs warnings when configuration is incomplete. Set a stable `SESSION_SECRET` (at least 32 characters) so sessions survive restarts, and set `PUBLIC_BASE_URL` to the public HTTPS origin so card QR codes point at the live site. On a new database the administrator account is created with `INITIAL_ADMIN_PASSWORD` when provided (at least 12 characters), otherwise the documented default `PTKadmin@2026` is used. If the persistent disk is missing, the app falls back to a local `./data` directory and warns that data will not survive a redeploy.
+The app always starts, but logs warnings when configuration is incomplete. Set a stable `SESSION_SECRET` (at least 32 characters) so sessions survive restarts, and set `PUBLIC_BASE_URL` to the public HTTPS origin so card QR codes point at the live site. On a new database the administrator account is created with `INITIAL_ADMIN_PASSWORD` when provided (at least 12 characters), otherwise the documented default `PTKadmin@2026` is used. On the first run against an existing database the account is reset once to the documented default so you are never locked out; set `FORCE_ADMIN_RESET=true` once to force a reset to the configured/default password. If the persistent disk is missing, the app falls back to a local `./data` directory and warns that data will not survive a redeploy.
 
 ## Admin route shows 403 on form submission
 

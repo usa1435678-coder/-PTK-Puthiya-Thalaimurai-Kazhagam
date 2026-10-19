@@ -394,20 +394,22 @@ async function initDatabase() {
     throw new Error('The initial administrator password (INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD) must be at least 12 characters long.');
   }
   const forceReset = String(process.env.FORCE_ADMIN_RESET || '').toLowerCase() === 'true';
-  const targetPassword = configuredAdminPassword || DEFAULT_ADMIN_PASSWORD;
-  const matchesTarget = existingAdmin ? bcrypt.compareSync(targetPassword, existingAdmin.password_hash) : false;
   const legacyDefault = existingAdmin ? bcrypt.compareSync('admin123', existingAdmin.password_hash) : false;
-  // One-time migration marker. The first time this bootstrap runs against a database it
-  // (re)applies the configured/default password so the operator is never locked out by an
-  // unknown password left behind by an earlier build. Once the marker exists, later
-  // password changes made from the dashboard are preserved (unless a configured password
-  // is present, which stays authoritative, or FORCE_ADMIN_RESET is set).
-  const bootstrapMarkerKey = 'admin_password_bootstrap_v1';
+  // One-time migration marker (v2). The first time this bootstrap runs against a database
+  // it resets the administrator password to the documented default so the operator is never
+  // locked out by an unknown password left behind by an earlier build. Once the marker
+  // exists, later password changes made from the dashboard are preserved.
+  const bootstrapMarkerKey = 'admin_password_bootstrap_v2';
   const existingMarker = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [bootstrapMarkerKey]);
   const firstBootstrapRun = !existingMarker;
-  const shouldApplyPassword = !existingAdmin || forceReset || legacyDefault || firstBootstrapRun || (configuredAdminPassword && !matchesTarget);
+  const shouldApplyPassword = !existingAdmin || forceReset || legacyDefault || firstBootstrapRun;
   if (shouldApplyPassword) {
-    const password = targetPassword;
+    // A configured password is honored when creating a brand-new account, when upgrading an
+    // account that still uses the legacy default, or on an explicit reset. When migrating an
+    // existing account that has an unknown password, the documented default is used instead
+    // so the operator can always sign in.
+    const useConfigured = !existingAdmin || forceReset || legacyDefault;
+    const password = useConfigured ? (configuredAdminPassword || DEFAULT_ADMIN_PASSWORD) : DEFAULT_ADMIN_PASSWORD;
     const passwordHash = bcrypt.hashSync(password, 12);
     if (existingAdmin) {
       await runQuery('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existingAdmin.id]);
@@ -420,7 +422,7 @@ async function initDatabase() {
     const credentialsPath = path.join(path.dirname(databasePath), 'admin-credentials.txt');
     await fs.promises.writeFile(
       credentialsPath,
-      `Username: ${adminUsername}\nPassword: ${password}\nSource: ${configuredAdminPassword ? 'INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD environment variable' : 'built-in first-run default (change it after logging in)'}\n`,
+      `Username: ${adminUsername}\nPassword: ${password}\nSource: ${useConfigured && configuredAdminPassword ? 'INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD environment variable' : 'documented first-run default (change it after logging in)'}\n`,
       { mode: 0o600 }
     );
   }

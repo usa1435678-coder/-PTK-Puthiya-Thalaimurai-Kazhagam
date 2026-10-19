@@ -29,7 +29,7 @@ The app will run on `http://localhost:3000`
 
 ### Admin Credentials
 
-On first startup the administrator account is created with the documented password `PTKadmin@2026`, which is also written to `data/admin-credentials.txt`. Keep that file private and persist the `data` directory. Set `INITIAL_ADMIN_PASSWORD` (or `ADMIN_PASSWORD`) before first startup to choose your own password; when set, that value is authoritative and re-applied at startup so you can always sign in. Without it, the documented default is only used when the account is missing or still on the legacy `admin123` default, so a password you change in System settings is preserved. Set `FORCE_ADMIN_RESET=true` once to force the account back to the configured/default password.
+On first startup the administrator account is created with the documented password `PTKadmin@2026`, which is also written to `data/admin-credentials.txt`. Keep that file private and persist the `data` directory. Set `INITIAL_ADMIN_PASSWORD` (or `ADMIN_PASSWORD`) before first startup to choose the password for a brand-new database. On the first run against an existing database the account is reset once to the documented default `PTKadmin@2026` so you are never locked out by an unknown password, after which changes made from System settings are preserved. Set `FORCE_ADMIN_RESET=true` once to force the account back to the configured/default password.
 
 ### Database
 - SQLite database stored in `data/ptk.db` by default; set `DB_PATH` to override it
@@ -100,7 +100,7 @@ The repository includes a `render.yaml` Blueprint for a Docker web service with 
 2. Sign in to Render, choose **New → Blueprint**, connect the GitHub repository, and select that branch.
 3. Review the Blueprint. It creates the `ptk-digital-platform` web service and a 1 GB persistent disk at `/var/data`. Confirm the paid plan and disk before applying.
 4. Wait for the `/healthz` check and deployment to pass. Render assigns the permanent `onrender.com` URL in the service dashboard.
-5. Sign in with username `admin` and the `INITIAL_ADMIN_PASSWORD` you set in the Blueprint (default `PTKadmin@2026`). Change it under System settings after signing in.
+5. Sign in with username `admin` and password `PTKadmin@2026` (or the `INITIAL_ADMIN_PASSWORD` you set). Change it under System settings after signing in.
 6. If using a custom domain, add it in the Render service settings and follow Render's DNS/HTTPS instructions.
 
 For an existing service, first take and verify an external backup, then attach a persistent disk in Render service settings and use a mount path of `/var/data`. Set `PERSISTENT_STORAGE_ROOT=/var/data`, `DB_PATH=/var/data/ptk.db`, `BACKUP_DIR=/var/data/backups`, `UPLOAD_DIR=/var/data/uploads`, and `MEMBER_CSV_PATH=/var/data/ptk-members.csv`, then deploy. Production startup is refused unless each path is configured beneath the persistent root and the root is present as an actual mounted filesystem. Do not delete/recreate a service or detach a disk as a way to apply these settings: disk/service recreation can cause data loss.
