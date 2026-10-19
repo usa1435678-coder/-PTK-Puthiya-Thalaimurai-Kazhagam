@@ -397,10 +397,15 @@ async function initDatabase() {
   const targetPassword = configuredAdminPassword || DEFAULT_ADMIN_PASSWORD;
   const matchesTarget = existingAdmin ? bcrypt.compareSync(targetPassword, existingAdmin.password_hash) : false;
   const legacyDefault = existingAdmin ? bcrypt.compareSync('admin123', existingAdmin.password_hash) : false;
-  // Apply when: no admin yet, an explicit reset was requested, the account still uses
-  // the legacy default, or a configured password is present but does not match (the
-  // environment variable is authoritative so the operator can always sign in).
-  const shouldApplyPassword = !existingAdmin || forceReset || legacyDefault || (configuredAdminPassword && !matchesTarget);
+  // One-time migration marker. The first time this bootstrap runs against a database it
+  // (re)applies the configured/default password so the operator is never locked out by an
+  // unknown password left behind by an earlier build. Once the marker exists, later
+  // password changes made from the dashboard are preserved (unless a configured password
+  // is present, which stays authoritative, or FORCE_ADMIN_RESET is set).
+  const bootstrapMarkerKey = 'admin_password_bootstrap_v1';
+  const existingMarker = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [bootstrapMarkerKey]);
+  const firstBootstrapRun = !existingMarker;
+  const shouldApplyPassword = !existingAdmin || forceReset || legacyDefault || firstBootstrapRun || (configuredAdminPassword && !matchesTarget);
   if (shouldApplyPassword) {
     const password = targetPassword;
     const passwordHash = bcrypt.hashSync(password, 12);
@@ -417,6 +422,12 @@ async function initDatabase() {
       credentialsPath,
       `Username: ${adminUsername}\nPassword: ${password}\nSource: ${configuredAdminPassword ? 'INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD environment variable' : 'built-in first-run default (change it after logging in)'}\n`,
       { mode: 0o600 }
+    );
+  }
+  if (firstBootstrapRun) {
+    await runQuery(
+      'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+      [bootstrapMarkerKey, 'done']
     );
   }
 
