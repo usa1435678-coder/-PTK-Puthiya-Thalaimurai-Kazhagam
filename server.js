@@ -223,7 +223,7 @@ app.use((req, res, next) => {
 
 app.get('/healthz', async (req, res) => {
   await getRow('SELECT 1');
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', build: 'ptk-2026-10-19-3' });
 });
 
 function requireAuth(req, res, next) {
