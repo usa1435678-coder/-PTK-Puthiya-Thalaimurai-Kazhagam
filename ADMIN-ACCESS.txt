@@ -10,19 +10,17 @@ Live site:
 
 First-run login:
   Username: admin
-  Password: PTKadmin@2026
+  Password: Set INITIAL_ADMIN_PASSWORD, or read data/admin-credentials.txt
+           after first startup of a new local database.
 
 Notes:
-  * If you set INITIAL_ADMIN_PASSWORD, that value is used as the password.
-    Otherwise the documented default above is used (a legacy ADMIN_PASSWORD is
-    only honored together with FORCE_ADMIN_RESET=true).
-  * On the first run against an existing database the account is reset once to
-    the default above so you are never locked out by an unknown password. After
-    that, changes you make from the dashboard persist across restarts/redeploys.
-  * To force a reset back to the configured/default password, set
-    FORCE_ADMIN_RESET=true once and redeploy.
-  * Change the initial password from Admin dashboard > System settings before
-    using the site beyond testing. Keep your database and backups private.
+  * Existing administrator passwords are preserved when the app starts.
+  * INITIAL_ADMIN_PASSWORD (or legacy ADMIN_PASSWORD) is used when creating an
+    administrator; an existing account changes only when FORCE_ADMIN_RESET=true.
+  * To force a reset, set a new INITIAL_ADMIN_PASSWORD of at least 12 characters
+    and FORCE_ADMIN_RESET=true for one startup, then remove the reset flag.
+  * Changing the password from Admin dashboard > System settings removes the
+    generated first-run credentials file. Keep your database and backups private.
 
 Data & backups:
   * The SQLite database, automatic backups, uploaded files and the member CSV

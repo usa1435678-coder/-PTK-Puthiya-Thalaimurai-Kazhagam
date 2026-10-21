@@ -11,8 +11,8 @@ const fs = require('fs');
 
 // --- Persistent storage bootstrap (must run before ./db is loaded) ---
 // Prefer the Render persistent disk (default /var/data) when it is mounted and
-// writable; otherwise fall back to a local ./data directory so the app always
-// starts. Every path can still be overridden explicitly with env variables.
+// writable; otherwise use ./data for local development. Production startup is
+// refused unless the persistent mount and all configured storage paths are valid.
 const persistentStorageRoot = path.resolve(process.env.PERSISTENT_STORAGE_ROOT || '/var/data');
 function directoryIsWritable(directory) {
   try {
@@ -23,7 +23,21 @@ function directoryIsWritable(directory) {
     return false;
   }
 }
-const persistentStorageMounted = directoryIsWritable(persistentStorageRoot);
+function isPersistentStorageMounted(mountPath) {
+  try {
+    const mountInfo = fs.readFileSync('/proc/self/mountinfo', 'utf8');
+    return mountInfo.split('\n').some(line => {
+      const fields = line.split(' - ')[0].split(' ');
+      const mountedAt = fields[4] && fields[4].replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
+      return mountedAt && path.resolve(mountedAt) === mountPath;
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'EACCES') return false;
+    throw error;
+  }
+}
+const persistentStorageMounted = directoryIsWritable(persistentStorageRoot) &&
+  isPersistentStorageMounted(persistentStorageRoot);
 const storageRoot = persistentStorageMounted ? persistentStorageRoot : path.join(__dirname, 'data');
 if (!process.env.DB_PATH) process.env.DB_PATH = path.join(storageRoot, 'ptk.db');
 if (!process.env.BACKUP_DIR) process.env.BACKUP_DIR = path.join(storageRoot, 'backups');
@@ -48,19 +62,6 @@ const {
 const app = express();
 const port = process.env.PORT || 3000;
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR);
-function isPersistentStorageMounted(mountPath) {
-  try {
-    const mountInfo = fs.readFileSync('/proc/self/mountinfo', 'utf8');
-    return mountInfo.split('\n').some(line => {
-      const fields = line.split(' - ')[0].split(' ');
-      const mountedAt = fields[4] && fields[4].replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
-      return mountedAt && path.resolve(mountedAt) === mountPath;
-    });
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'EACCES') return false;
-    throw error;
-  }
-}
 const isInsidePersistentStorage = (targetPath) => {
   const relative = path.relative(storageRoot, path.resolve(targetPath));
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -70,6 +71,9 @@ const persistentStorageConfigured = persistentStorageMounted &&
   isInsidePersistentStorage(process.env.BACKUP_DIR) &&
   isInsidePersistentStorage(process.env.UPLOAD_DIR) &&
   isInsidePersistentStorage(process.env.MEMBER_CSV_PATH);
+if (process.env.NODE_ENV === 'production' && !persistentStorageConfigured) {
+  throw new Error('Refusing to start in production without a mounted persistent disk configured for the database, backups, uploads, and member CSV.');
+}
 const loginAttempts = new Map();
 const loginAttemptWindowMs = 15 * 60 * 1000;
 const maxLoginAttempts = 5;
@@ -1198,6 +1202,12 @@ app.post('/admin/settings/password', requireAuth, async (req, res) => {
     return res.status(400).send('The new administrator passwords do not match.');
   }
 
+  const credentialsPath = path.join(path.dirname(process.env.DB_PATH), 'admin-credentials.txt');
+  try {
+    await fs.promises.unlink(credentialsPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
   const passwordHash = bcrypt.hashSync(newPassword, 12);
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {

@@ -387,30 +387,25 @@ async function initDatabase() {
     || await getRow('SELECT id, password_hash FROM users WHERE username = ?', ['admin']);
   const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD || '';
   const legacyAdminPassword = process.env.ADMIN_PASSWORD || '';
-  const configuredAdminPassword = initialAdminPassword || legacyAdminPassword;
-  // Documented first-run password so the operator can always sign in.
-  const DEFAULT_ADMIN_PASSWORD = 'PTKadmin@2026';
-  if (configuredAdminPassword && configuredAdminPassword.length < 12) {
-    throw new Error('The initial administrator password (INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD) must be at least 12 characters long.');
-  }
   const forceReset = String(process.env.FORCE_ADMIN_RESET || '').toLowerCase() === 'true';
+  const configuredAdminPassword = initialAdminPassword || legacyAdminPassword;
+  if (configuredAdminPassword && configuredAdminPassword.length < 12) {
+    throw new Error('The initial or forced-reset administrator password must be at least 12 characters long.');
+  }
+  if (forceReset && !configuredAdminPassword) {
+    throw new Error('FORCE_ADMIN_RESET=true requires INITIAL_ADMIN_PASSWORD (or legacy ADMIN_PASSWORD) to be set.');
+  }
   const legacyDefault = existingAdmin ? bcrypt.compareSync('admin123', existingAdmin.password_hash) : false;
-  // One-time migration marker (v3). The first time this bootstrap runs against a database it
-  // (re)sets the administrator password so the operator is never locked out by an unknown
-  // password left behind by an earlier build. Once the marker exists, dashboard changes are
-  // preserved and the password only changes again on an explicit FORCE_ADMIN_RESET.
-  const bootstrapMarkerKey = 'admin_password_bootstrap_v3';
-  const existingMarker = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [bootstrapMarkerKey]);
-  const firstBootstrapRun = !existingMarker;
-  const shouldApplyPassword = !existingAdmin || forceReset || legacyDefault || firstBootstrapRun;
+  const resetMarkerKey = 'admin_password_force_reset_hash';
+  const resetMarker = forceReset
+    ? await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [resetMarkerKey])
+    : null;
+  const resetAlreadyApplied = Boolean(
+    forceReset && resetMarker && bcrypt.compareSync(configuredAdminPassword, resetMarker.setting_value)
+  );
+  const shouldApplyPassword = !existingAdmin || legacyDefault || (forceReset && !resetAlreadyApplied);
   if (shouldApplyPassword) {
-    // A deliberately-set INITIAL_ADMIN_PASSWORD is honored. The legacy ADMIN_PASSWORD is only
-    // honored on an explicit FORCE_ADMIN_RESET because it is often an auto-generated value the
-    // operator never saw. Otherwise the documented default is used so sign-in always works.
-    let password;
-    if (initialAdminPassword) password = initialAdminPassword;
-    else if (forceReset && legacyAdminPassword) password = legacyAdminPassword;
-    else password = DEFAULT_ADMIN_PASSWORD;
+    const password = configuredAdminPassword || crypto.randomBytes(24).toString('hex');
     const passwordHash = bcrypt.hashSync(password, 12);
     if (existingAdmin) {
       await runQuery('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existingAdmin.id]);
@@ -423,15 +418,20 @@ async function initDatabase() {
     const credentialsPath = path.join(path.dirname(databasePath), 'admin-credentials.txt');
     await fs.promises.writeFile(
       credentialsPath,
-      `Username: ${adminUsername}\nPassword: ${password}\nSource: ${password === DEFAULT_ADMIN_PASSWORD ? 'documented first-run default (change it after logging in)' : 'INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD environment variable'}\n`,
+      configuredAdminPassword
+        ? `Username: ${adminUsername}\nPassword: managed through the administrator password environment variable.\n`
+        : `Username: ${adminUsername}\nPassword: ${password}\nThis password was generated for first-run access. Change it after signing in and keep this file private.\n`,
       { mode: 0o600 }
     );
-  }
-  if (firstBootstrapRun) {
-    await runQuery(
-      'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
-      [bootstrapMarkerKey, 'done']
-    );
+    await fs.promises.chmod(credentialsPath, 0o600);
+    if (forceReset) {
+      await runQuery(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+        [resetMarkerKey, bcrypt.hashSync(configuredAdminPassword, 12)]
+      );
+    }
+  } else if (!forceReset) {
+    await runQuery('DELETE FROM settings WHERE setting_key = ?', [resetMarkerKey]);
   }
 
   console.log(`PTK database ready: ${databasePath}`);

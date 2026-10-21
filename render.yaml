@@ -26,11 +26,9 @@ services:
         value: /var/data/ptk-members.csv
       - key: SESSION_SECRET
         generateValue: true
-      # First-run administrator login. Change the password from the dashboard
-      # after the first sign-in. If you prefer Render to generate the secret,
-      # remove the value below and switch it to `generateValue: true`, then read
-      # it from Dashboard -> your service -> Environment.
+      # Render generates a unique initial password. Read it from the service
+      # Environment page; existing administrator accounts are not reset on deploy.
       - key: INITIAL_ADMIN_USERNAME
         value: admin
       - key: INITIAL_ADMIN_PASSWORD
-        value: PTKadmin@2026
+        generateValue: true
