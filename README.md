@@ -13,6 +13,7 @@ Set `PORT`, `DB_PATH`, `BACKUP_DIR`, `PERSISTENT_STORAGE_ROOT`, `UPLOAD_DIR`, `M
 ## Main routes
 
 - `/` — public home page, announcements, events, contact and volunteer forms.
+- `/privacy` and `/terms` — public policy pages managed from Website content.
 - `/membership` — membership application form, including optional profile photo.
 - `/application-status` — public application lookup using the application reference and phone number.
 - `/verify/:memberId` — public membership-card status check.

@@ -328,12 +328,33 @@ app.get('/', async (req, res) => {
     volunteers: await count('SELECT COUNT(*) AS total FROM volunteers')
   };
 
+  res.set('Cache-Control', 'no-store');
   res.render('index', {
     settings,
     announcements,
     events,
     heroStats,
     formatDate
+  });
+});
+
+app.get('/privacy', async (req, res) => {
+  const settings = await loadSiteSettings();
+  res.set('Cache-Control', 'no-store');
+  res.render('public-policy', {
+    settings,
+    title: 'Privacy Policy',
+    content: settings.privacy_policy
+  });
+});
+
+app.get('/terms', async (req, res) => {
+  const settings = await loadSiteSettings();
+  res.set('Cache-Control', 'no-store');
+  res.render('public-policy', {
+    settings,
+    title: 'Terms and Conditions',
+    content: settings.terms
   });
 });
 
