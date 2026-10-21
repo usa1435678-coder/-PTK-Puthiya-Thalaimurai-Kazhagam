@@ -962,8 +962,8 @@ app.post('/admin/members/:id/delete', requireAuth, async (req, res) => {
 app.get('/admin/branding', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const notices = {
-    updated: 'Branding settings saved.',
-    default: 'Built-in PTK image restored.'
+    updated: 'Branding settings and image choices saved.',
+    default: 'Built-in branding image restored.'
   };
   res.render('admin-branding', {
     settings,
