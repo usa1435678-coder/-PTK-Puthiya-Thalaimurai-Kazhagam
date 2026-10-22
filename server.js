@@ -1061,14 +1061,34 @@ app.post('/admin/branding', requireAuth, upload.fields([
     .map(key => settings[key])
     .filter(url => url && url.startsWith('/uploads/') && !Object.values(payload).includes(url));
   if (oldUploadUrls.length) await createDatabaseBackup('before-delete');
-  for (const [key, value] of Object.entries(payload)) {
-    await runQuery('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value', [key, value]);
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    for (const [key, value] of Object.entries(payload)) {
+      await runQuery(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+        [key, value]
+      );
+    }
+    await addAuditLog('branding_updated', 'Branding settings updated', 'settings', 'branding', req.session.user.username);
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    const uploadedFiles = Object.values(req.files || {}).flat().filter(file => file && file.path);
+    for (const file of uploadedFiles) {
+      await fs.promises.unlink(file.path).catch(cleanupError => {
+        if (cleanupError.code !== 'ENOENT') console.error('Failed to remove uncommitted branding upload:', cleanupError);
+      });
+    }
+    throw error;
   }
   for (const key of ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']) {
-    if (settings[key] && settings[key] !== payload[key]) await removeUnusedMemberPhoto(settings[key]);
+    if (settings[key] && settings[key] !== payload[key]) {
+      await removeUnusedMemberPhoto(settings[key]).catch(error => {
+        console.error(`Failed to clean up replaced branding image for ${key}:`, error);
+      });
+    }
   }
 
-  await addAuditLog('branding_updated', 'Branding settings updated', 'settings', 'branding', req.session.user.username);
   res.redirect('/admin/branding?saved=updated');
 });
 
@@ -1080,19 +1100,29 @@ app.get('/admin/content', requireAuth, async (req, res) => {
 
 app.post('/admin/content', requireAuth, async (req, res) => {
   const payload = {
-    about_text: req.body.about_text,
-    mission_text: req.body.mission_text,
-    vision_text: req.body.vision_text,
-    privacy_policy: req.body.privacy_policy,
-    terms: req.body.terms,
-    contact_address: req.body.contact_address,
-    contact_phone: req.body.contact_phone,
-    contact_email: req.body.contact_email
+    about_text: typeof req.body.about_text === 'string' ? req.body.about_text : '',
+    mission_text: typeof req.body.mission_text === 'string' ? req.body.mission_text : '',
+    vision_text: typeof req.body.vision_text === 'string' ? req.body.vision_text : '',
+    privacy_policy: typeof req.body.privacy_policy === 'string' ? req.body.privacy_policy : '',
+    terms: typeof req.body.terms === 'string' ? req.body.terms : '',
+    contact_address: typeof req.body.contact_address === 'string' ? req.body.contact_address : '',
+    contact_phone: typeof req.body.contact_phone === 'string' ? req.body.contact_phone : '',
+    contact_email: typeof req.body.contact_email === 'string' ? req.body.contact_email : ''
   };
-  for (const [key, value] of Object.entries(payload)) {
-    await runQuery('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value', [key, value]);
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    for (const [key, value] of Object.entries(payload)) {
+      await runQuery(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+        [key, value]
+      );
+    }
+    await addAuditLog('website_content_updated', 'Homepage content updated', 'settings', 'website_content', req.session.user.username);
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    throw error;
   }
-  await addAuditLog('website_content_updated', 'Homepage content updated', 'settings', 'website_content', req.session.user.username);
   res.redirect('/admin/content?saved=1');
 });
 
