@@ -1060,9 +1060,11 @@ app.post('/admin/branding', requireAuth, upload.fields([
   const oldUploadUrls = ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']
     .map(key => settings[key])
     .filter(url => url && url.startsWith('/uploads/') && !Object.values(payload).includes(url));
-  if (oldUploadUrls.length) await createDatabaseBackup('before-delete');
-  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  let transactionStarted = false;
   try {
+    if (oldUploadUrls.length) await createDatabaseBackup('before-delete');
+    await runQuery('BEGIN IMMEDIATE TRANSACTION');
+    transactionStarted = true;
     for (const [key, value] of Object.entries(payload)) {
       await runQuery(
         'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
@@ -1071,8 +1073,13 @@ app.post('/admin/branding', requireAuth, upload.fields([
     }
     await addAuditLog('branding_updated', 'Branding settings updated', 'settings', 'branding', req.session.user.username);
     await runQuery('COMMIT');
+    transactionStarted = false;
   } catch (error) {
-    await runQuery('ROLLBACK');
+    if (transactionStarted) {
+      await runQuery('ROLLBACK').catch(rollbackError => {
+        console.error('Failed to roll back branding settings transaction:', rollbackError);
+      });
+    }
     const uploadedFiles = Object.values(req.files || {}).flat().filter(file => file && file.path);
     for (const file of uploadedFiles) {
       await fs.promises.unlink(file.path).catch(cleanupError => {
