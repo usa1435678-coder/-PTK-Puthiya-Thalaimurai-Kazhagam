@@ -197,8 +197,52 @@ test('admin branding persists in SQLite across restart and production requires m
     assert.equal(persistedName.setting_value, 'Persistent Integration Test PTK', 'failed settings writes should roll back');
     assert.deepEqual(fs.readdirSync(environment.UPLOAD_DIR), [], 'uploaded files from failed saves should be removed');
 
+    const successfulUpload = new FormData();
+    successfulUpload.append('party_name_english', 'Persistent Integration Test PTK');
+    successfulUpload.append('logo_file', new Blob(['persistent branding image'], { type: 'image/png' }), 'logo.png');
+    const uploadResponse = await fetch(`${baseUrl}/admin/branding`, {
+      method: 'POST',
+      headers: { cookie, origin: baseUrl },
+      body: successfulUpload,
+      redirect: 'manual'
+    });
+    assert.equal(uploadResponse.status, 302, 'branding image upload should save');
+    const savedLogo = await getDatabaseRow(
+      environment.DB_PATH,
+      "SELECT setting_value FROM settings WHERE setting_key = 'logo_url'"
+    );
+    assert.match(savedLogo.setting_value, /^\/uploads\/[a-f0-9]+\.png$/);
+    const imageResponse = await fetch(`${baseUrl}${savedLogo.setting_value}`);
+    assert.equal(imageResponse.status, 200, 'saved branding upload should be served publicly');
+    assert.equal(await imageResponse.text(), 'persistent branding image');
+
+    const contentResponse = await fetch(`${baseUrl}/admin/content`, {
+      method: 'POST',
+      headers: {
+        cookie,
+        origin: baseUrl,
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        about_text: 'Persistent public about content',
+        mission_text: 'Persistent mission',
+        vision_text: 'Persistent vision',
+        privacy_policy: 'Published privacy policy from admin',
+        terms: 'Published terms from admin',
+        contact_address: 'Persistent contact address',
+        contact_phone: '5551234',
+        contact_email: 'admin@example.test'
+      }),
+      redirect: 'manual'
+    });
+    assert.equal(contentResponse.status, 302, 'admin-managed public content should save');
+    const publicPrivacy = await fetch(`${baseUrl}/privacy`);
+    assert.match(await publicPrivacy.text(), /Published privacy policy from admin/, 'saved policy should appear publicly');
+
     const publicPage = await fetch(baseUrl);
-    assert.match(await publicPage.text(), /Persistent Integration Test PTK/, 'public homepage should show saved branding');
+    const publicHtml = await publicPage.text();
+    assert.match(publicHtml, /Persistent Integration Test PTK/, 'public homepage should show saved branding');
+    assert.match(publicHtml, /Persistent public about content/, 'public homepage should show saved website content');
     await stopServer(child);
     child = null;
 
@@ -206,6 +250,11 @@ test('admin branding persists in SQLite across restart and production requires m
     const restartedBranding = await fetch(`${baseUrl}/admin/branding`, { headers: { cookie } });
     assert.equal(restartedBranding.status, 200, 'database-backed admin session should remain valid after restart');
     assert.match(await restartedBranding.text(), /Persistent Integration Test PTK/, 'branding settings should persist after restart');
+    const restartedPrivacy = await fetch(`${baseUrl}/privacy`);
+    assert.match(await restartedPrivacy.text(), /Published privacy policy from admin/, 'public content should persist after restart');
+    const restartedImage = await fetch(`${baseUrl}${savedLogo.setting_value}`);
+    assert.equal(restartedImage.status, 200, 'branding image should persist and remain served after restart');
+    assert.equal(await restartedImage.text(), 'persistent branding image');
     const health = await fetch(`${baseUrl}/healthz`);
     assert.equal(health.status, 200);
 
