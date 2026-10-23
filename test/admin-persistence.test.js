@@ -113,6 +113,19 @@ function getDatabaseRow(databasePath, sql, parameters = []) {
   });
 }
 
+async function postForm(baseUrl, route, cookie, values) {
+  return fetch(`${baseUrl}${route}`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      origin: baseUrl,
+      'content-type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams(values),
+    redirect: 'manual'
+  });
+}
+
 test('admin branding persists in SQLite across restart and production requires mounted storage', async () => {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'ptk-admin-persistence-'));
   const dataDirectory = path.join(temporaryDirectory, 'data');
@@ -239,10 +252,227 @@ test('admin branding persists in SQLite across restart and production requires m
     const publicPrivacy = await fetch(`${baseUrl}/privacy`);
     assert.match(await publicPrivacy.text(), /Published privacy policy from admin/, 'saved policy should appear publicly');
 
+    const announcementCreate = await postForm(baseUrl, '/admin/announcements', cookie, {
+      title: 'Persistent public announcement',
+      content: 'Announcement content survives restart.',
+      published: '1'
+    });
+    assert.equal(announcementCreate.status, 302);
+    const announcement = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM announcements WHERE title = ?',
+      ['Persistent public announcement']
+    );
+    assert(announcement, 'admin announcement should be written to SQLite');
+    const announcementEdit = await postForm(baseUrl, `/admin/announcements/${announcement.id}/edit`, cookie, {
+      title: 'Edited public announcement',
+      content: 'Edited announcement content survives restart.',
+      published: '1'
+    });
+    assert.equal(announcementEdit.status, 302);
+    const announcementDeleteFixture = await postForm(baseUrl, '/admin/announcements', cookie, {
+      title: 'Delete announcement fixture',
+      content: 'This fixture should be deleted.'
+    });
+    assert.equal(announcementDeleteFixture.status, 302);
+    const announcementToDelete = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM announcements WHERE title = ?',
+      ['Delete announcement fixture']
+    );
+    const announcementDelete = await postForm(
+      baseUrl,
+      `/admin/announcements/${announcementToDelete.id}/delete`,
+      cookie,
+      {}
+    );
+    assert.equal(announcementDelete.status, 302);
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM announcements WHERE id = ?', [announcementToDelete.id]),
+      undefined,
+      'admin announcement delete should persist'
+    );
+
+    const eventCreate = await postForm(baseUrl, '/admin/events', cookie, {
+      title: 'Persistent public event',
+      description: 'Event description survives restart.',
+      location: 'Test hall',
+      event_date: '2098-05-12',
+      published: '1'
+    });
+    assert.equal(eventCreate.status, 302);
+    const event = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM events WHERE title = ?',
+      ['Persistent public event']
+    );
+    assert(event, 'admin event should be written to SQLite');
+    const eventEdit = await postForm(baseUrl, `/admin/events/${event.id}/edit`, cookie, {
+      title: 'Edited public event',
+      description: 'Edited event description survives restart.',
+      location: 'Updated test hall',
+      event_date: '2098-06-14',
+      published: '1'
+    });
+    assert.equal(eventEdit.status, 302);
+    const eventDeleteFixture = await postForm(baseUrl, '/admin/events', cookie, {
+      title: 'Delete event fixture',
+      description: 'This fixture should be deleted.',
+      event_date: '2098-07-01'
+    });
+    assert.equal(eventDeleteFixture.status, 302);
+    const eventToDelete = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM events WHERE title = ?',
+      ['Delete event fixture']
+    );
+    const eventDelete = await postForm(baseUrl, `/admin/events/${eventToDelete.id}/delete`, cookie, {});
+    assert.equal(eventDelete.status, 302);
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM events WHERE id = ?', [eventToDelete.id]),
+      undefined,
+      'admin event delete should persist'
+    );
+
+    const grievanceCreate = await fetch(`${baseUrl}/grievance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        full_name: 'Integration Grievance User',
+        phone: '55590001',
+        district: 'Chennai',
+        subject: 'Original grievance subject',
+        message: 'Original grievance message'
+      })
+    });
+    assert.equal(grievanceCreate.status, 200);
+    const grievance = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM grievances WHERE phone = ?',
+      ['55590001']
+    );
+    assert(grievance, 'public grievance submission should be stored');
+    assert.equal(
+      (await postForm(baseUrl, `/admin/grievances/${grievance.id}/status`, cookie, { status: 'in_progress' })).status,
+      302
+    );
+    assert.equal(
+      (await postForm(baseUrl, `/admin/grievances/${grievance.id}/edit`, cookie, {
+        full_name: 'Edited Grievance User',
+        phone: '55590001',
+        district: 'Chennai',
+        subject: 'Edited grievance subject',
+        message: 'Edited grievance message'
+      })).status,
+      302
+    );
+
+    const contactCreate = await fetch(`${baseUrl}/contact`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        full_name: 'Integration Contact User',
+        email: 'contact-integration@example.test',
+        phone: '55590002',
+        subject: 'Original contact subject',
+        message: 'Original contact message'
+      })
+    });
+    assert.equal(contactCreate.status, 200);
+    const contact = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM contact_requests WHERE email = ?',
+      ['contact-integration@example.test']
+    );
+    assert(contact, 'public contact submission should be stored');
+    assert.equal(
+      (await postForm(baseUrl, `/admin/contacts/${contact.id}/status`, cookie, { status: 'resolved' })).status,
+      302
+    );
+    assert.equal(
+      (await postForm(baseUrl, `/admin/contacts/${contact.id}/edit`, cookie, {
+        full_name: 'Edited Contact User',
+        email: 'contact-integration@example.test',
+        phone: '55590002',
+        subject: 'Edited contact subject',
+        message: 'Edited contact message'
+      })).status,
+      302
+    );
+
+    const volunteerCreate = await fetch(`${baseUrl}/volunteer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        full_name: 'Integration Volunteer User',
+        phone: '55590003',
+        email: 'volunteer-integration@example.test',
+        district: 'Chennai',
+        interest: 'Community organizing',
+        availability: 'Weekends'
+      })
+    });
+    assert.equal(volunteerCreate.status, 200);
+    const volunteer = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM volunteers WHERE phone = ?',
+      ['55590003']
+    );
+    assert(volunteer, 'public volunteer registration should be stored');
+    assert.equal(
+      (await postForm(baseUrl, `/admin/volunteers/${volunteer.id}/profile`, cookie, {
+        full_name: 'Integration Volunteer User',
+        phone: '55590003',
+        email: 'volunteer-integration@example.test',
+        district: 'Chennai',
+        local_unit: 'Central',
+        membership_category: 'Volunteer',
+        address: '1 Test Road, Chennai',
+        review_note: 'Profile completed by integration test'
+      })).status,
+      302
+    );
+    assert.equal(
+      (await postForm(baseUrl, `/admin/volunteers/${volunteer.id}/approve`, cookie, {
+        note: 'Approved by integration test'
+      })).status,
+      302
+    );
+    const volunteerMember = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id, member_id, status FROM volunteers WHERE id = ?',
+      [volunteer.id]
+    );
+    assert.equal(volunteerMember.status, 'approved');
+    const volunteerMemberId = volunteerMember.member_id;
+    const member = await getDatabaseRow(environment.DB_PATH, 'SELECT id, member_id FROM members WHERE id = ?', [volunteerMemberId]);
+    assert(member, 'approving a volunteer should create the linked permanent member');
+    assert(await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM cards WHERE member_id = ?', [member.id]), 'approval should issue a member card');
+    assert.equal(
+      (await postForm(baseUrl, `/admin/members/${member.id}/status`, cookie, { status: 'inactive' })).status,
+      302
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status FROM members WHERE id = ?', [member.id])).status,
+      'inactive',
+      'admin member deactivation should persist'
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status FROM cards WHERE member_id = ?', [member.id])).status,
+      'revoked',
+      'member deactivation should revoke its card'
+    );
+    assert.equal(
+      (await postForm(baseUrl, `/admin/members/${member.id}/status`, cookie, { status: 'active' })).status,
+      302
+    );
+
     const publicPage = await fetch(baseUrl);
     const publicHtml = await publicPage.text();
     assert.match(publicHtml, /Persistent Integration Test PTK/, 'public homepage should show saved branding');
     assert.match(publicHtml, /Persistent public about content/, 'public homepage should show saved website content');
+    assert.match(publicHtml, /Edited public announcement/, 'published announcement edits should appear publicly');
+    assert.match(publicHtml, /Edited public event/, 'published event edits should appear publicly');
     await stopServer(child);
     child = null;
 
@@ -252,6 +482,30 @@ test('admin branding persists in SQLite across restart and production requires m
     assert.match(await restartedBranding.text(), /Persistent Integration Test PTK/, 'branding settings should persist after restart');
     const restartedPrivacy = await fetch(`${baseUrl}/privacy`);
     assert.match(await restartedPrivacy.text(), /Published privacy policy from admin/, 'public content should persist after restart');
+    const restartedPublicPage = await fetch(baseUrl);
+    const restartedPublicHtml = await restartedPublicPage.text();
+    assert.match(restartedPublicHtml, /Edited public announcement/, 'edited published announcement should persist after restart');
+    assert.match(restartedPublicHtml, /Edited public event/, 'edited published event should persist after restart');
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status, subject FROM grievances WHERE id = ?', [grievance.id])).subject,
+      'Edited grievance subject',
+      'admin-edited grievance should persist after restart'
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status, subject FROM contact_requests WHERE id = ?', [contact.id])).status,
+      'resolved',
+      'admin contact status should persist after restart'
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status FROM volunteers WHERE id = ?', [volunteer.id])).status,
+      'approved',
+      'approved volunteer should persist after restart'
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status FROM members WHERE id = ?', [member.id])).status,
+      'active',
+      'member activation should persist after restart'
+    );
     const restartedImage = await fetch(`${baseUrl}${savedLogo.setting_value}`);
     assert.equal(restartedImage.status, 200, 'branding image should persist and remain served after restart');
     assert.equal(await restartedImage.text(), 'persistent branding image');
