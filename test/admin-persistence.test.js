@@ -550,6 +550,8 @@ test('admin branding persists in SQLite across restart and production requires m
     const manualBackups = fs.readdirSync(environment.BACKUP_DIR)
       .filter(filename => /^ptk-manual-.+\.sqlite$/.test(filename));
     assert(manualBackups.length > 0, 'manual backup should be saved in configured backup storage');
+    const manualBackup = manualBackups.sort().at(-1);
+    assert(fs.statSync(path.join(environment.BACKUP_DIR, `${manualBackup}.uploads`)).isDirectory());
 
     const publicPage = await fetch(baseUrl);
     const publicHtml = await publicPage.text();
@@ -599,6 +601,28 @@ test('admin branding persists in SQLite across restart and production requires m
       (await getDatabaseRow(environment.DB_PATH, 'SELECT status FROM membership_applications WHERE id = ?', [application.id])).status,
       'approved',
       'application review status should persist after restart'
+    );
+
+    await runDatabaseQuery(
+      environment.DB_PATH,
+      "UPDATE settings SET setting_value = 'Unsaved test mutation' WHERE setting_key = 'party_name_english'"
+    );
+    const restoreResponse = await postForm(
+      baseUrl,
+      `/admin/automatic-backups/${encodeURIComponent(manualBackup)}/restore`,
+      cookie,
+      {}
+    );
+    assert.equal(restoreResponse.status, 302, 'administrator should be able to restore a full database snapshot');
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT setting_value FROM settings WHERE setting_key = ?', ['party_name_english'])).setting_value,
+      'Persistent Integration Test PTK',
+      'full snapshot restore should restore saved settings'
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT title FROM announcements WHERE title = ?', ['Edited public announcement'])).title,
+      'Edited public announcement',
+      'full snapshot restore should restore public announcements'
     );
 
     const memberDelete = await postForm(baseUrl, `/admin/members/${applicantMember.id}/delete`, cookie, {});
