@@ -1099,10 +1099,52 @@ app.post('/admin/branding', requireAuth, upload.fields([
   res.redirect('/admin/branding?saved=updated');
 });
 
+const editableHomeCopyFields = [
+  { key: 'hero_welcome_text', label: 'Hero welcome text' },
+  { key: 'hero_membership_cta', label: 'Hero membership button' },
+  { key: 'hero_updates_cta', label: 'Hero updates button' },
+  { key: 'hero_members_label', label: 'Member count label' },
+  { key: 'hero_districts_label', label: 'District count label' },
+  { key: 'hero_volunteers_label', label: 'Volunteer count label' },
+  { key: 'about_eyebrow', label: 'About section label' },
+  { key: 'about_heading', label: 'About section heading' },
+  { key: 'about_legacy_heading', label: 'About card heading' },
+  { key: 'principles_eyebrow', label: 'Principles section label' },
+  { key: 'principles_heading', label: 'Principles section heading' },
+  { key: 'principle_people_title', label: 'People First title' },
+  { key: 'principle_people_text', label: 'People First description', multiline: true },
+  { key: 'principle_integrity_title', label: 'Integrity title' },
+  { key: 'principle_integrity_text', label: 'Integrity description', multiline: true },
+  { key: 'principle_progress_title', label: 'Progress title' },
+  { key: 'principle_progress_text', label: 'Progress description', multiline: true },
+  { key: 'principle_unity_title', label: 'Unity title' },
+  { key: 'principle_unity_text', label: 'Unity description', multiline: true },
+  { key: 'announcements_eyebrow', label: 'Announcements section label' },
+  { key: 'announcements_heading', label: 'Announcements heading' },
+  { key: 'events_eyebrow', label: 'Events section label' },
+  { key: 'events_heading', label: 'Events heading' },
+  { key: 'involvement_eyebrow', label: 'Get involved section label' },
+  { key: 'involvement_heading', label: 'Get involved heading' },
+  { key: 'join_membership_title', label: 'Membership card heading' },
+  { key: 'join_membership_text', label: 'Membership card description', multiline: true },
+  { key: 'join_volunteer_title', label: 'Volunteer card heading' },
+  { key: 'join_volunteer_text', label: 'Volunteer card description', multiline: true },
+  { key: 'join_grievance_title', label: 'Grievance card heading' },
+  { key: 'join_grievance_text', label: 'Grievance card description', multiline: true },
+  { key: 'public_forms_eyebrow', label: 'Public forms section label' },
+  { key: 'public_forms_heading', label: 'Public forms heading' },
+  { key: 'volunteer_form_heading', label: 'Volunteer form heading' },
+  { key: 'grievance_form_heading', label: 'Grievance form heading' },
+  { key: 'contact_form_heading', label: 'Contact form heading' },
+  { key: 'footer_quick_links_heading', label: 'Footer quick links heading' },
+  { key: 'footer_resources_heading', label: 'Footer resources heading' },
+  { key: 'footer_contact_heading', label: 'Footer contact heading' }
+];
+
 app.get('/admin/content', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const success = req.query.saved === '1' ? 'Website content saved.' : null;
-  res.render('admin-content', { settings, success });
+  res.render('admin-content', { settings, success, editableHomeCopyFields });
 });
 
 app.post('/admin/content', requireAuth, async (req, res) => {
@@ -1114,7 +1156,11 @@ app.post('/admin/content', requireAuth, async (req, res) => {
     terms: typeof req.body.terms === 'string' ? req.body.terms : '',
     contact_address: typeof req.body.contact_address === 'string' ? req.body.contact_address : '',
     contact_phone: typeof req.body.contact_phone === 'string' ? req.body.contact_phone : '',
-    contact_email: typeof req.body.contact_email === 'string' ? req.body.contact_email : ''
+    contact_email: typeof req.body.contact_email === 'string' ? req.body.contact_email : '',
+    ...Object.fromEntries(editableHomeCopyFields.map(({ key }) => [
+      key,
+      typeof req.body[key] === 'string' ? req.body[key].trim() : ''
+    ]))
   };
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {

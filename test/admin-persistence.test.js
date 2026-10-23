@@ -244,7 +244,11 @@ test('admin branding persists in SQLite across restart and production requires m
         terms: 'Published terms from admin',
         contact_address: 'Persistent contact address',
         contact_phone: '5551234',
-        contact_email: 'admin@example.test'
+        contact_email: 'admin@example.test',
+        hero_welcome_text: 'Admin-controlled welcome',
+        about_heading: 'A future shaped by members',
+        principle_people_text: 'Every public principle is now admin-editable.',
+        join_volunteer_text: 'Volunteer copy saved from the dashboard.'
       }),
       redirect: 'manual'
     });
@@ -557,6 +561,10 @@ test('admin branding persists in SQLite across restart and production requires m
     const publicHtml = await publicPage.text();
     assert.match(publicHtml, /Persistent Integration Test PTK/, 'public homepage should show saved branding');
     assert.match(publicHtml, /Persistent public about content/, 'public homepage should show saved website content');
+    assert.match(publicHtml, /Admin-controlled welcome/, 'admin should be able to change public hero copy');
+    assert.match(publicHtml, /A future shaped by members/, 'admin should be able to change public section headings');
+    assert.match(publicHtml, /Every public principle is now admin-editable\./, 'admin should be able to change public principle descriptions');
+    assert.match(publicHtml, /Volunteer copy saved from the dashboard\./, 'admin should be able to change public involvement copy');
     assert.match(publicHtml, /Edited public announcement/, 'published announcement edits should appear publicly');
     assert.match(publicHtml, /Edited public event/, 'published event edits should appear publicly');
     await stopServer(child);
@@ -566,12 +574,16 @@ test('admin branding persists in SQLite across restart and production requires m
     const restartedBranding = await fetch(`${baseUrl}/admin/branding`, { headers: { cookie } });
     assert.equal(restartedBranding.status, 200, 'database-backed admin session should remain valid after restart');
     assert.match(await restartedBranding.text(), /Persistent Integration Test PTK/, 'branding settings should persist after restart');
+    const restartedContent = await fetch(`${baseUrl}/admin/content`, { headers: { cookie } });
+    assert.match(await restartedContent.text(), /Admin-controlled welcome/, 'admin-editable homepage copy should load after restart');
     const restartedPrivacy = await fetch(`${baseUrl}/privacy`);
     assert.match(await restartedPrivacy.text(), /Published privacy policy from admin/, 'public content should persist after restart');
     const restartedPublicPage = await fetch(baseUrl);
     const restartedPublicHtml = await restartedPublicPage.text();
     assert.match(restartedPublicHtml, /Edited public announcement/, 'edited published announcement should persist after restart');
     assert.match(restartedPublicHtml, /Edited public event/, 'edited published event should persist after restart');
+    assert.match(restartedPublicHtml, /Admin-controlled welcome/, 'custom homepage copy should persist after restart');
+    assert.match(restartedPublicHtml, /Every public principle is now admin-editable\./, 'custom principles should persist after restart');
     assert.equal(
       (await getDatabaseRow(environment.DB_PATH, 'SELECT status, subject FROM grievances WHERE id = ?', [grievance.id])).subject,
       'Edited grievance subject',
