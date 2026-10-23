@@ -600,6 +600,71 @@ test('admin branding persists in SQLite across restart and production requires m
       'approved',
       'application review status should persist after restart'
     );
+
+    const memberDelete = await postForm(baseUrl, `/admin/members/${applicantMember.id}/delete`, cookie, {});
+    assert.equal(memberDelete.status, 302, 'admin should be able to delete an issued member');
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM members WHERE id = ?', [applicantMember.id]),
+      undefined,
+      'member deletion should persist'
+    );
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM cards WHERE member_id = ?', [applicantMember.id]),
+      undefined,
+      'member deletion should remove its card'
+    );
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM membership_applications WHERE id = ?', [application.id]),
+      undefined,
+      'member deletion should remove its linked approved application'
+    );
+
+    const pendingApplicationResponse = await fetch(`${baseUrl}/membership`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        full_name: 'Application Delete Fixture',
+        phone: '55590005',
+        district: 'Chennai',
+        local_unit: 'East',
+        address: '3 Delete Road, Chennai',
+        membership_category: 'General Member',
+        consent: 'on'
+      })
+    });
+    assert.equal(pendingApplicationResponse.status, 200);
+    const pendingApplication = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id FROM membership_applications WHERE phone = ?',
+      ['55590005']
+    );
+    const applicationDelete = await postForm(
+      baseUrl,
+      `/admin/application/${pendingApplication.id}/delete`,
+      cookie,
+      {}
+    );
+    assert.equal(applicationDelete.status, 302, 'admin should be able to delete a pending application');
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM membership_applications WHERE id = ?', [pendingApplication.id]),
+      undefined,
+      'application deletion should persist'
+    );
+
+    for (const [route, table, recordId] of [
+      [`/admin/grievances/${grievance.id}/delete`, 'grievances', grievance.id],
+      [`/admin/contacts/${contact.id}/delete`, 'contact_requests', contact.id],
+      [`/admin/volunteers/${volunteer.id}/delete`, 'volunteers', volunteer.id]
+    ]) {
+      const deletion = await postForm(baseUrl, route, cookie, {});
+      assert.equal(deletion.status, 302, `admin should be able to delete the ${table} fixture`);
+      assert.equal(
+        await getDatabaseRow(environment.DB_PATH, `SELECT id FROM ${table} WHERE id = ?`, [recordId]),
+        undefined,
+        `${table} deletion should persist`
+      );
+    }
+
     const restartedImage = await fetch(`${baseUrl}${savedLogo.setting_value}`);
     assert.equal(restartedImage.status, 200, 'branding image should persist and remain served after restart');
     assert.equal(await restartedImage.text(), 'persistent branding image');
