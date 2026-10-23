@@ -983,14 +983,13 @@ app.post('/admin/members/:id/delete', requireAuth, async (req, res) => {
 app.get('/admin/branding', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const notices = {
-    updated: 'Branding settings and image choices saved.',
-    default: 'Built-in branding image restored.'
+    updated: 'Branding settings saved.',
+    default: 'Built-in branding image selected.'
   };
   res.render('admin-branding', {
     settings,
     success: notices[req.query.saved] || null,
-    error: null,
-    persistentStorageConfigured
+    error: null
   });
 });
 
@@ -1004,33 +1003,19 @@ app.post('/admin/branding/default/:asset', requireAuth, async (req, res) => {
   const asset = builtInAssets[req.params.asset];
   if (!asset) return res.status(404).send('Built-in branding asset not found.');
 
-  const previous = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [asset.setting]);
-  if (previous && previous.setting_value !== asset.url && previous.setting_value.startsWith('/uploads/')) {
-    await createDatabaseBackup('before-delete');
-  }
   await runQuery(
     'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
     [asset.setting, asset.url]
   );
-  if (previous && previous.setting_value !== asset.url) await removeUnusedMemberPhoto(previous.setting_value);
   await addAuditLog('branding_default_restored', `Built-in ${req.params.asset} image restored`, 'settings', asset.setting, req.session.user.username);
   res.redirect('/admin/branding?saved=default');
 });
 
-app.post('/admin/branding', requireAuth, upload.fields([
-  { name: 'logo_file', maxCount: 1 },
-  { name: 'leader_photo_file', maxCount: 1 },
-  { name: 'flag_file', maxCount: 1 },
-  { name: 'signature_file', maxCount: 1 },
-  { name: 'hero_background_file', maxCount: 1 },
-  { name: 'card_background_file', maxCount: 1 }
-]), async (req, res) => {
+app.post('/admin/branding', requireAuth, async (req, res) => {
+  if (req.is('multipart/form-data')) {
+    return res.status(415).send('Branding image uploads are no longer supported.');
+  }
   const settings = await loadSiteSettings();
-  const uploadedUrl = (field, settingKey) => {
-    const file = req.files && req.files[field] && req.files[field][0];
-    if (file) return `/uploads/${file.filename}`;
-    return req.body[`clear_${settingKey}`] === '1' ? '' : (settings[settingKey] || '');
-  };
   const textValue = (field, settingKey) => typeof req.body[field] === 'string'
     ? req.body[field].trim()
     : (settings[settingKey] || '');
@@ -1047,22 +1032,18 @@ app.post('/admin/branding', requireAuth, upload.fields([
     card_red: colorValue(req.body.card_red, settings.card_red || '#A8202B'),
     card_yellow: colorValue(req.body.card_yellow, settings.card_yellow || '#F2C744'),
     card_green: colorValue(req.body.card_green, settings.card_green || '#16734B'),
-    logo_url: uploadedUrl('logo_file', 'logo_url'),
-    leader_photo_url: uploadedUrl('leader_photo_file', 'leader_photo_url'),
-    flag_url: uploadedUrl('flag_file', 'flag_url'),
-    signature_url: uploadedUrl('signature_file', 'signature_url'),
-    hero_background_url: uploadedUrl('hero_background_file', 'hero_background_url'),
-    card_background_url: uploadedUrl('card_background_file', 'card_background_url'),
+    logo_url: settings.logo_url || '',
+    leader_photo_url: settings.leader_photo_url || '',
+    flag_url: settings.flag_url || '',
+    signature_url: settings.signature_url || '',
+    hero_background_url: settings.hero_background_url || '',
+    card_background_url: settings.card_background_url || '',
     about_text: textValue('about_text', 'about_text'),
     mission_text: textValue('mission_text', 'mission_text'),
     vision_text: textValue('vision_text', 'vision_text')
   };
-  const oldUploadUrls = ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']
-    .map(key => settings[key])
-    .filter(url => url && url.startsWith('/uploads/') && !Object.values(payload).includes(url));
   let transactionStarted = false;
   try {
-    if (oldUploadUrls.length) await createDatabaseBackup('before-delete');
     await runQuery('BEGIN IMMEDIATE TRANSACTION');
     transactionStarted = true;
     for (const [key, value] of Object.entries(payload)) {
@@ -1080,20 +1061,7 @@ app.post('/admin/branding', requireAuth, upload.fields([
         console.error('Failed to roll back branding settings transaction:', rollbackError);
       });
     }
-    const uploadedFiles = Object.values(req.files || {}).flat().filter(file => file && file.path);
-    for (const file of uploadedFiles) {
-      await fs.promises.unlink(file.path).catch(cleanupError => {
-        if (cleanupError.code !== 'ENOENT') console.error('Failed to remove uncommitted branding upload:', cleanupError);
-      });
-    }
     throw error;
-  }
-  for (const key of ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']) {
-    if (settings[key] && settings[key] !== payload[key]) {
-      await removeUnusedMemberPhoto(settings[key]).catch(error => {
-        console.error(`Failed to clean up replaced branding image for ${key}:`, error);
-      });
-    }
   }
 
   res.redirect('/admin/branding?saved=updated');

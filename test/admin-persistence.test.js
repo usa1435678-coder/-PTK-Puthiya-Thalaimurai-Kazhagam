@@ -185,22 +185,12 @@ test('admin branding persists in SQLite across restart and production requires m
     assert.equal(brandingPage.status, 200, 'branding settings require an authenticated administrator');
     const brandingHtml = await brandingPage.text();
     assert.equal((brandingHtml.match(/<form\b/g) || []).length, 1, 'branding controls must be inside one valid form');
+    assert.doesNotMatch(brandingHtml, /type="file"|enctype="multipart\/form-data"/, 'branding editor must not offer image uploads');
+    assert.doesNotMatch(brandingHtml, /name="clear_(logo|leader_photo|flag|signature|hero_background|card_background)_url"/, 'branding editor must not discard legacy image settings');
     assert.match(brandingHtml, /formaction="\/admin\/branding\/default\/logo"/);
     assert.match(brandingHtml, /formaction="\/admin\/branding\/default\/leader"/);
     assert.match(brandingHtml, /formaction="\/admin\/branding\/default\/flag"/);
     assert.match(brandingHtml, /formaction="\/admin\/branding\/default\/signature"/);
-
-    const clearLogoResponse = await fetch(`${baseUrl}/admin/branding`, {
-      method: 'POST',
-      headers: {
-        cookie,
-        origin: baseUrl,
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({ clear_logo_url: '1' }),
-      redirect: 'manual'
-    });
-    assert.equal(clearLogoResponse.status, 302, 'branding checkbox changes should save');
 
     const defaultResponse = await fetch(`${baseUrl}/admin/branding/default/logo`, {
       method: 'POST',
@@ -235,12 +225,10 @@ test('admin branding persists in SQLite across restart and production requires m
         SELECT RAISE(ABORT, 'intentional integration test failure');
       END
     `);
-    const failedSave = new FormData();
-    failedSave.append('party_name_english', 'Must Roll Back');
-    failedSave.append('logo_file', new Blob(['temporary failed upload'], { type: 'image/png' }), 'logo.png');
+    const failedSave = new URLSearchParams({ party_name_english: 'Must Roll Back' });
     const failedSaveResponse = await fetch(`${baseUrl}/admin/branding`, {
       method: 'POST',
-      headers: { cookie, origin: baseUrl },
+      headers: { cookie, origin: baseUrl, 'content-type': 'application/x-www-form-urlencoded' },
       body: failedSave,
       redirect: 'manual'
     });
@@ -251,26 +239,47 @@ test('admin branding persists in SQLite across restart and production requires m
       "SELECT setting_value FROM settings WHERE setting_key = 'party_name_english'"
     );
     assert.equal(persistedName.setting_value, 'Persistent Integration Test PTK', 'failed settings writes should roll back');
-    assert.deepEqual(fs.readdirSync(environment.UPLOAD_DIR), [], 'uploaded files from failed saves should be removed');
+    const legacyBrandingImage = '/uploads/legacy-branding.png';
+    const legacyBrandingImagePath = path.join(environment.UPLOAD_DIR, 'legacy-branding.png');
+    fs.writeFileSync(legacyBrandingImagePath, 'legacy branding image');
+    await runDatabaseQuery(
+      environment.DB_PATH,
+      'UPDATE settings SET setting_value = ? WHERE setting_key = ?',
+      [legacyBrandingImage, 'logo_url']
+    );
 
-    const successfulUpload = new FormData();
-    successfulUpload.append('party_name_english', 'Persistent Integration Test PTK');
-    successfulUpload.append('logo_file', new Blob(['persistent branding image'], { type: 'image/png' }), 'logo.png');
-    const uploadResponse = await fetch(`${baseUrl}/admin/branding`, {
+    const multipartBranding = new FormData();
+    multipartBranding.append('party_name_english', 'Must Not Save Multipart');
+    multipartBranding.append('logo_file', new Blob(['ignored branding upload'], { type: 'image/png' }), 'logo.png');
+    const rejectedUpload = await fetch(`${baseUrl}/admin/branding`, {
       method: 'POST',
       headers: { cookie, origin: baseUrl },
-      body: successfulUpload,
+      body: multipartBranding,
       redirect: 'manual'
     });
-    assert.equal(uploadResponse.status, 302, 'branding image upload should save');
+    assert.equal(rejectedUpload.status, 415, 'branding upload requests should be explicitly rejected');
+    assert.equal(fs.readFileSync(legacyBrandingImagePath, 'utf8'), 'legacy branding image', 'rejecting uploads must not alter existing image files');
+    assert.deepEqual(fs.readdirSync(environment.UPLOAD_DIR), ['legacy-branding.png'], 'rejected branding uploads must not create files');
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT setting_value FROM settings WHERE setting_key = ?', ['party_name_english'])).setting_value,
+      'Persistent Integration Test PTK',
+      'rejected branding upload must not update text settings'
+    );
+
+    const brandingSave = await postForm(baseUrl, '/admin/branding', cookie, {
+      party_name_english: 'Persistent Integration Test PTK',
+      tagline: 'Database round trip',
+      card_red: '#112233'
+    });
+    assert.equal(brandingSave.status, 302, 'branding settings should save without an image upload');
     const savedLogo = await getDatabaseRow(
       environment.DB_PATH,
       "SELECT setting_value FROM settings WHERE setting_key = 'logo_url'"
     );
-    assert.match(savedLogo.setting_value, /^\/uploads\/[a-f0-9]+\.png$/);
+    assert.equal(savedLogo.setting_value, legacyBrandingImage, 'saving text settings should preserve existing branding image paths');
     const imageResponse = await fetch(`${baseUrl}${savedLogo.setting_value}`);
-    assert.equal(imageResponse.status, 200, 'saved branding upload should be served publicly');
-    assert.equal(await imageResponse.text(), 'persistent branding image');
+    assert.equal(imageResponse.status, 200, 'existing branding images should remain publicly available');
+    assert.equal(await imageResponse.text(), 'legacy branding image');
 
     const contentResponse = await fetch(`${baseUrl}/admin/content`, {
       method: 'POST',
@@ -603,6 +612,7 @@ test('admin branding persists in SQLite across restart and production requires m
     const publicPage = await fetch(baseUrl);
     const publicHtml = await publicPage.text();
     assert.match(publicHtml, /Persistent Integration Test PTK/, 'public homepage should show saved branding');
+    assert.match(publicHtml, /src="\/uploads\/legacy-branding\.png"/, 'public site should continue rendering an existing configured branding image');
     assert.match(publicHtml, /Persistent public about content/, 'public homepage should show saved website content');
     assert.match(publicHtml, /Admin-controlled welcome/, 'admin should be able to change public hero copy');
     assert.match(publicHtml, /A future shaped by members/, 'admin should be able to change public section headings');
@@ -625,6 +635,7 @@ test('admin branding persists in SQLite across restart and production requires m
     const restartedPublicHtml = await restartedPublicPage.text();
     assert.match(restartedPublicHtml, /Edited public announcement/, 'edited published announcement should persist after restart');
     assert.match(restartedPublicHtml, /Edited public event/, 'edited published event should persist after restart');
+    assert.match(restartedPublicHtml, /src="\/uploads\/legacy-branding\.png"/, 'legacy branding image selection should persist across restart');
     assert.match(restartedPublicHtml, /Admin-controlled welcome/, 'custom homepage copy should persist after restart');
     assert.match(restartedPublicHtml, /Every public principle is now admin-editable\./, 'custom principles should persist after restart');
     assert.equal(
@@ -746,7 +757,14 @@ test('admin branding persists in SQLite across restart and production requires m
 
     const restartedImage = await fetch(`${baseUrl}${savedLogo.setting_value}`);
     assert.equal(restartedImage.status, 200, 'branding image should persist and remain served after restart');
-    assert.equal(await restartedImage.text(), 'persistent branding image');
+    assert.equal(await restartedImage.text(), 'legacy branding image');
+    const defaultAfterRestart = await fetch(`${baseUrl}/admin/branding/default/logo`, {
+      method: 'POST',
+      headers: { cookie, origin: baseUrl },
+      redirect: 'manual'
+    });
+    assert.equal(defaultAfterRestart.status, 302, 'admin may still select a bundled logo');
+    assert.equal(fs.readFileSync(legacyBrandingImagePath, 'utf8'), 'legacy branding image', 'selecting a bundled logo must not delete legacy image files');
     const health = await fetch(`${baseUrl}/healthz`);
     assert.equal(health.status, 200);
 
