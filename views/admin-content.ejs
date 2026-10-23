@@ -29,6 +29,7 @@
         <div class="section-header">
           <div class="eyebrow">Website content</div>
           <h2>Manage content published on the public site</h2>
+          <p>Saved updates appear on the public homepage and policy pages immediately. Privacy policy: <a href="/privacy" target="_blank" rel="noopener">preview</a>; terms and conditions: <a href="/terms" target="_blank" rel="noopener">preview</a>.</p>
         </div>
         <% if (success) { %><div class="notice success"><%= success %></div><% } %>
         <div class="form-shell">
@@ -64,6 +65,25 @@
             <div style="margin-top: 18px;">
               <label>Contact email</label>
               <input name="contact_email" value="<%= settings.contact_email || '' %>" />
+            </div>
+            <div style="margin-top: 24px;">
+              <h3>Homepage headings and labels</h3>
+              <p>These fields control the public homepage copy. Leave a field blank to use its built-in text.</p>
+              <div class="form-row">
+                <% editableHomeCopyFields.filter(field => !field.multiline).forEach((field) => { %>
+                  <div>
+                    <label for="home-copy-<%= field.key %>"><%= field.label %></label>
+                    <input id="home-copy-<%= field.key %>" name="<%= field.key %>" value="<%= settings[field.key] || '' %>" />
+                  </div>
+                <% }) %>
+              </div>
+              <h3 style="margin-top: 20px;">Homepage descriptions</h3>
+              <% editableHomeCopyFields.filter(field => field.multiline).forEach((field) => { %>
+                <div style="margin-top: 14px;">
+                  <label for="home-copy-<%= field.key %>"><%= field.label %></label>
+                  <textarea id="home-copy-<%= field.key %>" name="<%= field.key %>"><%= settings[field.key] || '' %></textarea>
+                </div>
+              <% }) %>
             </div>
             <div style="margin-top: 22px;">
               <button class="btn btn-primary" type="submit">Save content</button>

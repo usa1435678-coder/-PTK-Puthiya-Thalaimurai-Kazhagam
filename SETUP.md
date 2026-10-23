@@ -18,9 +18,9 @@ Open `http://localhost:3000` in your browser.
 
 ### Step 3: Admin Access
 - Click "Admin" in the top navigation
-- Login with:
-  - Username: `admin`
-  - Password: `PTKadmin@2026`
+- Login with username `admin` and the password set in `INITIAL_ADMIN_PASSWORD`.
+  For a new local database without that setting, use the generated password
+  in `data/admin-credentials.txt`.
 
 ### Step 4: Customize Your Party
 1. Go to **Branding** → Update party name, leader info, contact details
@@ -86,11 +86,11 @@ Open `http://localhost:3000` in your browser.
 5. **Deploy** - Follow DEPLOYMENT.md for production setup
 6. **Backup** - Export database regularly from admin panel
 
-## Default Login
-- Username: `admin`
-- Password: `PTKadmin@2026`
-
-⚠️ **Change this password immediately in production.**
+## Admin Password Recovery
+Existing administrator passwords are preserved on startup. To reset access,
+set a new `INITIAL_ADMIN_PASSWORD` of at least 12 characters and
+`FORCE_ADMIN_RESET=true` for one startup, then remove the reset flag. On Render,
+keep the password in the service environment settings and never commit it.
 
 ## Need Help?
 

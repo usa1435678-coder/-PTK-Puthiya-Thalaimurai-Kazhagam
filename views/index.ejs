@@ -42,25 +42,25 @@
       <section class="hero"<% if (settings.hero_background_url) { %> style="background-image: linear-gradient(rgba(10, 12, 18, 0.55), rgba(10, 12, 18, 0.45)), url('<%= settings.hero_background_url %>');"<% } %>>
         <div class="container hero-grid">
           <div>
-            <div class="eyebrow" style="color: #fff;">Welcome to PTK</div>
+            <div class="eyebrow" style="color: #fff;"><%= settings.hero_welcome_text || 'Welcome to PTK' %></div>
             <h1><%= settings.party_name_tamil || 'PTK — புதிய தலைமுறை கழகம்' %></h1>
             <p><%= settings.tagline || 'Together for a stronger tomorrow' %></p>
             <div class="cta-row">
-              <a class="btn btn-primary" href="/membership">Apply for Membership</a>
-              <a class="btn btn-secondary" href="#announcements">Latest Updates</a>
+              <a class="btn btn-primary" href="/membership"><%= settings.hero_membership_cta || 'Apply for Membership' %></a>
+              <a class="btn btn-secondary" href="#announcements"><%= settings.hero_updates_cta || 'Latest Updates' %></a>
             </div>
             <div class="stat-strip">
               <div class="stat-box">
                 <strong><%= heroStats.members || 0 %></strong>
-                <span>Members</span>
+                <span><%= settings.hero_members_label || 'Members' %></span>
               </div>
               <div class="stat-box">
                 <strong><%= heroStats.districts || 0 %></strong>
-                <span>Districts</span>
+                <span><%= settings.hero_districts_label || 'Districts' %></span>
               </div>
               <div class="stat-box">
                 <strong><%= heroStats.volunteers || 0 %></strong>
-                <span>Volunteers</span>
+                <span><%= settings.hero_volunteers_label || 'Volunteers' %></span>
               </div>
             </div>
           </div>
@@ -87,13 +87,13 @@
       <section id="about" class="section">
         <div class="container">
           <div class="section-header">
-            <div class="eyebrow">About PTK</div>
-            <h2>Building a strong, inclusive political future</h2>
+            <div class="eyebrow"><%= settings.about_eyebrow || 'About PTK' %></div>
+            <h2><%= settings.about_heading || 'Building a strong, inclusive political future' %></h2>
           </div>
           <div class="grid-3">
             <div class="card">
               <div class="value-icon">🏛️</div>
-              <h3>Our Legacy</h3>
+              <h3><%= settings.about_legacy_heading || 'Our Legacy' %></h3>
               <p><%= settings.about_text || 'PTK is a people-first political movement founded on integrity, service, and progress for every community.' %></p>
             </div>
             <div class="card">
@@ -113,25 +113,25 @@
       <section id="mission" class="section" style="background:#eef4ef;">
         <div class="container">
           <div class="section-header">
-            <div class="eyebrow">Core Principles</div>
-            <h2>Values that guide our work</h2>
+            <div class="eyebrow"><%= settings.principles_eyebrow || 'Core Principles' %></div>
+            <h2><%= settings.principles_heading || 'Values that guide our work' %></h2>
           </div>
           <div class="list-grid">
             <div class="article-card">
-              <h3>People First</h3>
-              <p>We serve communities through direct engagement, ethical governance and long-term development.</p>
+              <h3><%= settings.principle_people_title || 'People First' %></h3>
+              <p><%= settings.principle_people_text || 'We serve communities through direct engagement, ethical governance and long-term development.' %></p>
             </div>
             <div class="article-card">
-              <h3>Integrity</h3>
-              <p>Our politics are grounded in accountability, transparency and honest public leadership.</p>
+              <h3><%= settings.principle_integrity_title || 'Integrity' %></h3>
+              <p><%= settings.principle_integrity_text || 'Our politics are grounded in accountability, transparency and honest public leadership.' %></p>
             </div>
             <div class="article-card">
-              <h3>Progress</h3>
-              <p>We work to improve livelihoods, infrastructure, education, healthcare and opportunity for all.</p>
+              <h3><%= settings.principle_progress_title || 'Progress' %></h3>
+              <p><%= settings.principle_progress_text || 'We work to improve livelihoods, infrastructure, education, healthcare and opportunity for all.' %></p>
             </div>
             <div class="article-card">
-              <h3>Unity</h3>
-              <p>We bring together workers, youth, women, farmers and professionals around common goals.</p>
+              <h3><%= settings.principle_unity_title || 'Unity' %></h3>
+              <p><%= settings.principle_unity_text || 'We bring together workers, youth, women, farmers and professionals around common goals.' %></p>
             </div>
           </div>
         </div>
@@ -140,8 +140,8 @@
       <section id="announcements" class="section">
         <div class="container">
           <div class="section-header">
-            <div class="eyebrow">Announcements</div>
-            <h2>Latest updates from PTK</h2>
+            <div class="eyebrow"><%= settings.announcements_eyebrow || 'Announcements' %></div>
+            <h2><%= settings.announcements_heading || 'Latest updates from PTK' %></h2>
           </div>
           <div class="list-grid">
             <% announcements.forEach((item) => { %>
@@ -158,8 +158,8 @@
       <section id="events" class="section" style="background:#f6f9f5;">
         <div class="container">
           <div class="section-header">
-            <div class="eyebrow">Events</div>
-            <h2>Upcoming public engagements</h2>
+            <div class="eyebrow"><%= settings.events_eyebrow || 'Events' %></div>
+            <h2><%= settings.events_heading || 'Upcoming public engagements' %></h2>
           </div>
           <div class="list-grid">
             <% events.forEach((event) => { %>
@@ -177,23 +177,23 @@
       <section class="section">
         <div class="container">
           <div class="section-header">
-            <div class="eyebrow">Get Involved</div>
-            <h2>Join the movement</h2>
+            <div class="eyebrow"><%= settings.involvement_eyebrow || 'Get Involved' %></div>
+            <h2><%= settings.involvement_heading || 'Join the movement' %></h2>
           </div>
           <div class="list-grid">
             <div class="form-shell">
-              <h3>Membership application</h3>
-              <p>Become a member and help build a stronger political future.</p>
+              <h3><%= settings.join_membership_title || 'Membership application' %></h3>
+              <p><%= settings.join_membership_text || 'Become a member and help build a stronger political future.' %></p>
               <a class="btn btn-primary" href="/membership">Apply now</a>
             </div>
             <div class="form-shell">
-              <h3>Volunteer with PTK</h3>
-              <p>Support campaigns, social work, and community outreach.</p>
+              <h3><%= settings.join_volunteer_title || 'Volunteer with PTK' %></h3>
+              <p><%= settings.join_volunteer_text || 'Support campaigns, social work, and community outreach.' %></p>
               <button class="btn btn-secondary" onclick="document.getElementById('volunteerForm').scrollIntoView({behavior:'smooth'})">Volunteer</button>
             </div>
             <div class="form-shell">
-              <h3>Raise a grievance</h3>
-              <p>Share your concern for appropriate review by the party team.</p>
+              <h3><%= settings.join_grievance_title || 'Raise a grievance' %></h3>
+              <p><%= settings.join_grievance_text || 'Share your concern for appropriate review by the party team.' %></p>
               <button class="btn btn-secondary" onclick="document.getElementById('grievanceForm').scrollIntoView({behavior:'smooth'})">Report</button>
             </div>
           </div>
@@ -203,12 +203,12 @@
       <section class="section" style="background:#fff;">
         <div class="container">
           <div class="section-header">
-            <div class="eyebrow">Public Forms</div>
-            <h2>Submit your details securely</h2>
+            <div class="eyebrow"><%= settings.public_forms_eyebrow || 'Public Forms' %></div>
+            <h2><%= settings.public_forms_heading || 'Submit your details securely' %></h2>
           </div>
           <div class="list-grid">
             <div class="form-shell" id="volunteerForm">
-              <h3>Volunteer registration</h3>
+              <h3><%= settings.volunteer_form_heading || 'Volunteer registration' %></h3>
               <form id="volunteerFormInner">
                 <div class="form-row">
                   <div>
@@ -247,7 +247,7 @@
             </div>
 
             <div class="form-shell" id="grievanceForm">
-              <h3>Public grievance</h3>
+              <h3><%= settings.grievance_form_heading || 'Public grievance' %></h3>
               <form id="grievanceFormInner">
                 <div class="form-row">
                   <div>
@@ -283,7 +283,7 @@
       <section class="section">
         <div class="container">
           <div class="form-shell">
-            <h3>Contact PTK</h3>
+            <h3><%= settings.contact_form_heading || 'Contact PTK' %></h3>
             <form id="contactForm">
               <div class="form-row">
                 <div>
@@ -323,7 +323,7 @@
           <p><%= settings.party_name_english || 'PTK — Puthiya Thalaimurai Kazhagam' %></p>
         </div>
         <div>
-          <h4>Quick Links</h4>
+          <h4><%= settings.footer_quick_links_heading || 'Quick Links' %></h4>
           <ul>
             <li><a href="#about">About</a></li>
             <li><a href="#announcements">Announcements</a></li>
@@ -332,7 +332,7 @@
           </ul>
         </div>
         <div>
-          <h4>Resources</h4>
+          <h4><%= settings.footer_resources_heading || 'Resources' %></h4>
           <ul>
             <li><a href="/admin/login">Admin</a></li>
             <li><a href="/application-status">Application status lookup</a></li>
@@ -340,11 +340,13 @@
           </ul>
         </div>
         <div>
-          <h4>Contact</h4>
+          <h4><%= settings.footer_contact_heading || 'Contact' %></h4>
           <ul>
             <li><%= settings.contact_email || 'hello@ptkparty.org' %></li>
             <li><%= settings.contact_phone || '+91 98765 43210' %></li>
             <li><%= settings.contact_address || 'PTK Headquarters, Tamil Nadu' %></li>
+            <li><a href="/privacy">Privacy policy</a></li>
+            <li><a href="/terms">Terms and conditions</a></li>
           </ul>
         </div>
       </div>

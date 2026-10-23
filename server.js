@@ -11,8 +11,8 @@ const fs = require('fs');
 
 // --- Persistent storage bootstrap (must run before ./db is loaded) ---
 // Prefer the Render persistent disk (default /var/data) when it is mounted and
-// writable; otherwise fall back to a local ./data directory so the app always
-// starts. Every path can still be overridden explicitly with env variables.
+// writable; otherwise use ./data for local development. Production startup is
+// refused unless the persistent mount and all configured storage paths are valid.
 const persistentStorageRoot = path.resolve(process.env.PERSISTENT_STORAGE_ROOT || '/var/data');
 function directoryIsWritable(directory) {
   try {
@@ -23,7 +23,21 @@ function directoryIsWritable(directory) {
     return false;
   }
 }
-const persistentStorageMounted = directoryIsWritable(persistentStorageRoot);
+function isPersistentStorageMounted(mountPath) {
+  try {
+    const mountInfo = fs.readFileSync('/proc/self/mountinfo', 'utf8');
+    return mountInfo.split('\n').some(line => {
+      const fields = line.split(' - ')[0].split(' ');
+      const mountedAt = fields[4] && fields[4].replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
+      return mountedAt && path.resolve(mountedAt) === mountPath;
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'EACCES') return false;
+    throw error;
+  }
+}
+const persistentStorageMounted = directoryIsWritable(persistentStorageRoot) &&
+  isPersistentStorageMounted(persistentStorageRoot);
 const storageRoot = persistentStorageMounted ? persistentStorageRoot : path.join(__dirname, 'data');
 if (!process.env.DB_PATH) process.env.DB_PATH = path.join(storageRoot, 'ptk.db');
 if (!process.env.BACKUP_DIR) process.env.BACKUP_DIR = path.join(storageRoot, 'backups');
@@ -48,19 +62,6 @@ const {
 const app = express();
 const port = process.env.PORT || 3000;
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR);
-function isPersistentStorageMounted(mountPath) {
-  try {
-    const mountInfo = fs.readFileSync('/proc/self/mountinfo', 'utf8');
-    return mountInfo.split('\n').some(line => {
-      const fields = line.split(' - ')[0].split(' ');
-      const mountedAt = fields[4] && fields[4].replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
-      return mountedAt && path.resolve(mountedAt) === mountPath;
-    });
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'EACCES') return false;
-    throw error;
-  }
-}
 const isInsidePersistentStorage = (targetPath) => {
   const relative = path.relative(storageRoot, path.resolve(targetPath));
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -70,6 +71,9 @@ const persistentStorageConfigured = persistentStorageMounted &&
   isInsidePersistentStorage(process.env.BACKUP_DIR) &&
   isInsidePersistentStorage(process.env.UPLOAD_DIR) &&
   isInsidePersistentStorage(process.env.MEMBER_CSV_PATH);
+if (process.env.NODE_ENV === 'production' && !persistentStorageConfigured) {
+  throw new Error('Refusing to start in production without a mounted persistent disk configured for the database, backups, uploads, and member CSV.');
+}
 const loginAttempts = new Map();
 const loginAttemptWindowMs = 15 * 60 * 1000;
 const maxLoginAttempts = 5;
@@ -324,12 +328,33 @@ app.get('/', async (req, res) => {
     volunteers: await count('SELECT COUNT(*) AS total FROM volunteers')
   };
 
+  res.set('Cache-Control', 'no-store');
   res.render('index', {
     settings,
     announcements,
     events,
     heroStats,
     formatDate
+  });
+});
+
+app.get('/privacy', async (req, res) => {
+  const settings = await loadSiteSettings();
+  res.set('Cache-Control', 'no-store');
+  res.render('public-policy', {
+    settings,
+    title: 'Privacy Policy',
+    content: settings.privacy_policy
+  });
+});
+
+app.get('/terms', async (req, res) => {
+  const settings = await loadSiteSettings();
+  res.set('Cache-Control', 'no-store');
+  res.render('public-policy', {
+    settings,
+    title: 'Terms and Conditions',
+    content: settings.terms
   });
 });
 
@@ -959,13 +984,12 @@ app.get('/admin/branding', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const notices = {
     updated: 'Branding settings saved.',
-    default: 'Built-in PTK image restored.'
+    default: 'Built-in branding image selected.'
   };
   res.render('admin-branding', {
     settings,
     success: notices[req.query.saved] || null,
-    error: null,
-    persistentStorageConfigured
+    error: null
   });
 });
 
@@ -979,33 +1003,19 @@ app.post('/admin/branding/default/:asset', requireAuth, async (req, res) => {
   const asset = builtInAssets[req.params.asset];
   if (!asset) return res.status(404).send('Built-in branding asset not found.');
 
-  const previous = await getRow('SELECT setting_value FROM settings WHERE setting_key = ?', [asset.setting]);
-  if (previous && previous.setting_value !== asset.url && previous.setting_value.startsWith('/uploads/')) {
-    await createDatabaseBackup('before-delete');
-  }
   await runQuery(
     'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
     [asset.setting, asset.url]
   );
-  if (previous && previous.setting_value !== asset.url) await removeUnusedMemberPhoto(previous.setting_value);
   await addAuditLog('branding_default_restored', `Built-in ${req.params.asset} image restored`, 'settings', asset.setting, req.session.user.username);
   res.redirect('/admin/branding?saved=default');
 });
 
-app.post('/admin/branding', requireAuth, upload.fields([
-  { name: 'logo_file', maxCount: 1 },
-  { name: 'leader_photo_file', maxCount: 1 },
-  { name: 'flag_file', maxCount: 1 },
-  { name: 'signature_file', maxCount: 1 },
-  { name: 'hero_background_file', maxCount: 1 },
-  { name: 'card_background_file', maxCount: 1 }
-]), async (req, res) => {
+app.post('/admin/branding', requireAuth, async (req, res) => {
+  if (req.is('multipart/form-data')) {
+    return res.status(415).send('Branding image uploads are no longer supported.');
+  }
   const settings = await loadSiteSettings();
-  const uploadedUrl = (field, settingKey) => {
-    const file = req.files && req.files[field] && req.files[field][0];
-    if (file) return `/uploads/${file.filename}`;
-    return req.body[`clear_${settingKey}`] === '1' ? '' : (settings[settingKey] || '');
-  };
   const textValue = (field, settingKey) => typeof req.body[field] === 'string'
     ? req.body[field].trim()
     : (settings[settingKey] || '');
@@ -1022,52 +1032,118 @@ app.post('/admin/branding', requireAuth, upload.fields([
     card_red: colorValue(req.body.card_red, settings.card_red || '#A8202B'),
     card_yellow: colorValue(req.body.card_yellow, settings.card_yellow || '#F2C744'),
     card_green: colorValue(req.body.card_green, settings.card_green || '#16734B'),
-    logo_url: uploadedUrl('logo_file', 'logo_url'),
-    leader_photo_url: uploadedUrl('leader_photo_file', 'leader_photo_url'),
-    flag_url: uploadedUrl('flag_file', 'flag_url'),
-    signature_url: uploadedUrl('signature_file', 'signature_url'),
-    hero_background_url: uploadedUrl('hero_background_file', 'hero_background_url'),
-    card_background_url: uploadedUrl('card_background_file', 'card_background_url'),
+    logo_url: settings.logo_url || '',
+    leader_photo_url: settings.leader_photo_url || '',
+    flag_url: settings.flag_url || '',
+    signature_url: settings.signature_url || '',
+    hero_background_url: settings.hero_background_url || '',
+    card_background_url: settings.card_background_url || '',
     about_text: textValue('about_text', 'about_text'),
     mission_text: textValue('mission_text', 'mission_text'),
     vision_text: textValue('vision_text', 'vision_text')
   };
-  const oldUploadUrls = ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']
-    .map(key => settings[key])
-    .filter(url => url && url.startsWith('/uploads/') && !Object.values(payload).includes(url));
-  if (oldUploadUrls.length) await createDatabaseBackup('before-delete');
-  for (const [key, value] of Object.entries(payload)) {
-    await runQuery('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value', [key, value]);
-  }
-  for (const key of ['logo_url', 'leader_photo_url', 'flag_url', 'signature_url', 'hero_background_url', 'card_background_url']) {
-    if (settings[key] && settings[key] !== payload[key]) await removeUnusedMemberPhoto(settings[key]);
+  let transactionStarted = false;
+  try {
+    await runQuery('BEGIN IMMEDIATE TRANSACTION');
+    transactionStarted = true;
+    for (const [key, value] of Object.entries(payload)) {
+      await runQuery(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+        [key, value]
+      );
+    }
+    await addAuditLog('branding_updated', 'Branding settings updated', 'settings', 'branding', req.session.user.username);
+    await runQuery('COMMIT');
+    transactionStarted = false;
+  } catch (error) {
+    if (transactionStarted) {
+      await runQuery('ROLLBACK').catch(rollbackError => {
+        console.error('Failed to roll back branding settings transaction:', rollbackError);
+      });
+    }
+    throw error;
   }
 
-  await addAuditLog('branding_updated', 'Branding settings updated', 'settings', 'branding', req.session.user.username);
   res.redirect('/admin/branding?saved=updated');
 });
+
+const editableHomeCopyFields = [
+  { key: 'hero_welcome_text', label: 'Hero welcome text' },
+  { key: 'hero_membership_cta', label: 'Hero membership button' },
+  { key: 'hero_updates_cta', label: 'Hero updates button' },
+  { key: 'hero_members_label', label: 'Member count label' },
+  { key: 'hero_districts_label', label: 'District count label' },
+  { key: 'hero_volunteers_label', label: 'Volunteer count label' },
+  { key: 'about_eyebrow', label: 'About section label' },
+  { key: 'about_heading', label: 'About section heading' },
+  { key: 'about_legacy_heading', label: 'About card heading' },
+  { key: 'principles_eyebrow', label: 'Principles section label' },
+  { key: 'principles_heading', label: 'Principles section heading' },
+  { key: 'principle_people_title', label: 'People First title' },
+  { key: 'principle_people_text', label: 'People First description', multiline: true },
+  { key: 'principle_integrity_title', label: 'Integrity title' },
+  { key: 'principle_integrity_text', label: 'Integrity description', multiline: true },
+  { key: 'principle_progress_title', label: 'Progress title' },
+  { key: 'principle_progress_text', label: 'Progress description', multiline: true },
+  { key: 'principle_unity_title', label: 'Unity title' },
+  { key: 'principle_unity_text', label: 'Unity description', multiline: true },
+  { key: 'announcements_eyebrow', label: 'Announcements section label' },
+  { key: 'announcements_heading', label: 'Announcements heading' },
+  { key: 'events_eyebrow', label: 'Events section label' },
+  { key: 'events_heading', label: 'Events heading' },
+  { key: 'involvement_eyebrow', label: 'Get involved section label' },
+  { key: 'involvement_heading', label: 'Get involved heading' },
+  { key: 'join_membership_title', label: 'Membership card heading' },
+  { key: 'join_membership_text', label: 'Membership card description', multiline: true },
+  { key: 'join_volunteer_title', label: 'Volunteer card heading' },
+  { key: 'join_volunteer_text', label: 'Volunteer card description', multiline: true },
+  { key: 'join_grievance_title', label: 'Grievance card heading' },
+  { key: 'join_grievance_text', label: 'Grievance card description', multiline: true },
+  { key: 'public_forms_eyebrow', label: 'Public forms section label' },
+  { key: 'public_forms_heading', label: 'Public forms heading' },
+  { key: 'volunteer_form_heading', label: 'Volunteer form heading' },
+  { key: 'grievance_form_heading', label: 'Grievance form heading' },
+  { key: 'contact_form_heading', label: 'Contact form heading' },
+  { key: 'footer_quick_links_heading', label: 'Footer quick links heading' },
+  { key: 'footer_resources_heading', label: 'Footer resources heading' },
+  { key: 'footer_contact_heading', label: 'Footer contact heading' }
+];
 
 app.get('/admin/content', requireAuth, async (req, res) => {
   const settings = await loadSiteSettings();
   const success = req.query.saved === '1' ? 'Website content saved.' : null;
-  res.render('admin-content', { settings, success });
+  res.render('admin-content', { settings, success, editableHomeCopyFields });
 });
 
 app.post('/admin/content', requireAuth, async (req, res) => {
   const payload = {
-    about_text: req.body.about_text,
-    mission_text: req.body.mission_text,
-    vision_text: req.body.vision_text,
-    privacy_policy: req.body.privacy_policy,
-    terms: req.body.terms,
-    contact_address: req.body.contact_address,
-    contact_phone: req.body.contact_phone,
-    contact_email: req.body.contact_email
+    about_text: typeof req.body.about_text === 'string' ? req.body.about_text : '',
+    mission_text: typeof req.body.mission_text === 'string' ? req.body.mission_text : '',
+    vision_text: typeof req.body.vision_text === 'string' ? req.body.vision_text : '',
+    privacy_policy: typeof req.body.privacy_policy === 'string' ? req.body.privacy_policy : '',
+    terms: typeof req.body.terms === 'string' ? req.body.terms : '',
+    contact_address: typeof req.body.contact_address === 'string' ? req.body.contact_address : '',
+    contact_phone: typeof req.body.contact_phone === 'string' ? req.body.contact_phone : '',
+    contact_email: typeof req.body.contact_email === 'string' ? req.body.contact_email : '',
+    ...Object.fromEntries(editableHomeCopyFields.map(({ key }) => [
+      key,
+      typeof req.body[key] === 'string' ? req.body[key].trim() : ''
+    ]))
   };
-  for (const [key, value] of Object.entries(payload)) {
-    await runQuery('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value', [key, value]);
+  await runQuery('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    for (const [key, value] of Object.entries(payload)) {
+      await runQuery(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value',
+        [key, value]
+      );
+    }
+    await addAuditLog('website_content_updated', 'Homepage content updated', 'settings', 'website_content', req.session.user.username);
+    await runQuery('COMMIT');
+  } catch (error) {
+    await runQuery('ROLLBACK');
+    throw error;
   }
-  await addAuditLog('website_content_updated', 'Homepage content updated', 'settings', 'website_content', req.session.user.username);
   res.redirect('/admin/content?saved=1');
 });
 
@@ -1198,6 +1274,12 @@ app.post('/admin/settings/password', requireAuth, async (req, res) => {
     return res.status(400).send('The new administrator passwords do not match.');
   }
 
+  const credentialsPath = path.join(path.dirname(process.env.DB_PATH), 'admin-credentials.txt');
+  try {
+    await fs.promises.unlink(credentialsPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
   const passwordHash = bcrypt.hashSync(newPassword, 12);
   await runQuery('BEGIN IMMEDIATE TRANSACTION');
   try {

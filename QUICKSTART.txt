@@ -12,10 +12,13 @@ RUN ON WINDOWS
 LOCAL FIRST-RUN ADMIN
 ---------------------
 Username: admin
-Password: PTKadmin@2026
+Set INITIAL_ADMIN_PASSWORD before first startup, or read the generated
+password from data/admin-credentials.txt after first startup of a new database.
 
-Change this password in Admin > System settings. These credentials are for first-run setup only. Change the password after
-local development only; production never creates this default account.
+Existing administrator passwords are preserved across startups. Change the
+password in Admin > System settings after signing in; production credentials
+must be supplied securely through the deployment environment. Changing the
+password removes the generated first-run credentials file.
 
 PUBLIC SITE AND ADMIN
 ---------------------

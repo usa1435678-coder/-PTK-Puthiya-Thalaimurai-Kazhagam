@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= title %> | <%= settings.party_name_english || 'PTK' %></title>
+    <link rel="stylesheet" href="/styles.css?v=20261015-scrollfix" />
+    <script src="/language.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container topbar">
+        <a class="brand" href="/">
+          <% if (settings.logo_url) { %>
+            <img class="brand-logo" src="<%= settings.logo_url %>" alt="PTK logo" />
+          <% } else { %>
+            <div class="brand-mark">PTK</div>
+          <% } %>
+          <div>
+            <div><%= settings.party_name_tamil || 'PTK — புதிய தலைமுறை கழகம்' %></div>
+            <small><%= settings.party_name_english || 'PTK — Puthiya Thalaimurai Kazhagam' %></small>
+          </div>
+        </a>
+        <nav class="nav">
+          <a href="/">Home</a>
+          <a href="/membership">Membership</a>
+          <a href="/admin/login">Admin</a>
+        </nav>
+      </div>
+    </header>
+    <main class="section">
+      <div class="container" style="max-width: 900px;">
+        <div class="section-header">
+          <div class="eyebrow"><%= settings.party_name_english || 'PTK' %></div>
+          <h1><%= title %></h1>
+        </div>
+        <div class="card">
+          <% if (content) { %>
+            <div style="white-space: pre-wrap;"><%= content %></div>
+          <% } else { %>
+            <p>This information has not been published yet.</p>
+          <% } %>
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div>
+          <h4><%= settings.party_name_english || 'PTK' %></h4>
+          <p><a href="/">Home</a></p>
+        </div>
+        <div>
+          <h4>Contact</h4>
+          <ul>
+            <li><%= settings.contact_email || '' %></li>
+            <li><%= settings.contact_phone || '' %></li>
+            <li><%= settings.contact_address || '' %></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Policies</h4>
+          <ul>
+            <li><a href="/privacy">Privacy policy</a></li>
+            <li><a href="/terms">Terms and conditions</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

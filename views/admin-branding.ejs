@@ -30,22 +30,13 @@
           <div class="eyebrow">Branding</div>
           <h2>Party identity and colour settings</h2>
         </div>
-        <% if (!persistentStorageConfigured) { %>
-          <div class="notice error">
-            Admin-uploaded branding changes are saved, but this production service does not have persistent storage configured.
-            New uploads may disappear after restart or redeploy. Existing image choices, including blank choices, are never changed on startup.
-            For permanent admin uploads, attach a persistent disk at <code>/var/data</code> and configure <code>UPLOAD_DIR=/var/data/uploads</code>.
-          </div>
-        <% } else { %>
-          <div class="notice success">
-            Branding uploads use the configured storage path. Confirm the Render disk is attached at <code>/var/data</code> and keep it attached through redeploys.
-            Built-in PTK branding assets are included with the app as defaults.
-          </div>
-        <% } %>
+        <div class="notice success">
+          Branding details and image choices are saved in the database. New branding image uploads are disabled; select a bundled PTK image to replace an existing image choice. Existing saved image files and settings are retained.
+        </div>
         <% if (success) { %><div class="notice success"><%= success %></div><% } %>
         <% if (error) { %><div class="notice error"><%= error %></div><% } %>
         <div class="form-shell">
-          <form method="POST" action="/admin/branding" enctype="multipart/form-data">
+          <form method="POST" action="/admin/branding">
             <div class="form-row">
               <div>
                 <label>Tamil party name</label>
@@ -82,41 +73,35 @@
             </div>
 
             <div style="margin-top: 20px;"><h3>Brand images</h3></div>
-            <p>Upload JPG, PNG, or WEBP files up to 5 MB. Leave a file blank to keep the current image. Existing selections are preserved on app restart; only admin saves, explicit reset buttons, or remove checkboxes change them.</p>
+            <p>New image uploads are disabled. Existing image selections are preserved unless you select a bundled default.</p>
             <div class="form-row">
               <div>
-                <label for="logo-file">Party logo</label>
-                <input id="logo-file" name="logo_file" type="file" accept="image/jpeg,image/png,image/webp" />
-                <% if (settings.logo_url) { %><img class="asset-preview" src="<%= settings.logo_url %>" alt="Current party logo" /><label><input type="checkbox" name="clear_logo_url" value="1" /> Remove current image</label><% } %>
-                <form method="POST" action="/admin/branding/default/logo"><button class="btn btn-secondary" type="submit">Use built-in PTK logo</button></form>
+                <label>Party logo</label>
+                <% if (settings.logo_url) { %><img class="asset-preview" src="<%= settings.logo_url %>" alt="Current party logo" /><% } %>
+                <button class="btn btn-secondary" type="submit" formaction="/admin/branding/default/logo" formmethod="post" formnovalidate>Use built-in PTK logo</button>
               </div>
               <div>
-                <label for="leader-photo-file">Leader photo</label>
-                <input id="leader-photo-file" name="leader_photo_file" type="file" accept="image/jpeg,image/png,image/webp" />
-                <% if (settings.leader_photo_url) { %><img class="asset-preview" src="<%= settings.leader_photo_url %>" alt="Current leader photo" /><label><input type="checkbox" name="clear_leader_photo_url" value="1" /> Remove current image</label><% } %>
-                <form method="POST" action="/admin/branding/default/leader"><button class="btn btn-secondary" type="submit">Use built-in leader photo</button></form>
+                <label>Leader photo</label>
+                <% if (settings.leader_photo_url) { %><img class="asset-preview" src="<%= settings.leader_photo_url %>" alt="Current leader photo" /><% } %>
+                <button class="btn btn-secondary" type="submit" formaction="/admin/branding/default/leader" formmethod="post" formnovalidate>Use built-in leader photo</button>
               </div>
               <div>
-                <label for="flag-file">Party flag</label>
-                <input id="flag-file" name="flag_file" type="file" accept="image/jpeg,image/png,image/webp" />
-                <% if (settings.flag_url) { %><img class="asset-preview" src="<%= settings.flag_url %>" alt="Current party flag" /><label><input type="checkbox" name="clear_flag_url" value="1" /> Remove current image</label><% } %>
-                <form method="POST" action="/admin/branding/default/flag"><button class="btn btn-secondary" type="submit">Use built-in PTK flag</button></form>
+                <label>Party flag</label>
+                <% if (settings.flag_url) { %><img class="asset-preview" src="<%= settings.flag_url %>" alt="Current party flag" /><% } %>
+                <button class="btn btn-secondary" type="submit" formaction="/admin/branding/default/flag" formmethod="post" formnovalidate>Use built-in PTK flag</button>
               </div>
               <div>
-                <label for="signature-file">Leader signature</label>
-                <input id="signature-file" name="signature_file" type="file" accept="image/jpeg,image/png,image/webp" />
-                <% if (settings.signature_url) { %><img class="asset-preview" src="<%= settings.signature_url %>" alt="Current leader signature" /><label><input type="checkbox" name="clear_signature_url" value="1" /> Remove current image</label><% } %>
-                <form method="POST" action="/admin/branding/default/signature"><button class="btn btn-secondary" type="submit">Use built-in leader signature</button></form>
+                <label>Leader signature</label>
+                <% if (settings.signature_url) { %><img class="asset-preview" src="<%= settings.signature_url %>" alt="Current leader signature" /><% } %>
+                <button class="btn btn-secondary" type="submit" formaction="/admin/branding/default/signature" formmethod="post" formnovalidate>Use built-in leader signature</button>
               </div>
               <div>
-                <label for="hero-background-file">Homepage background</label>
-                <input id="hero-background-file" name="hero_background_file" type="file" accept="image/jpeg,image/png,image/webp" />
-                <% if (settings.hero_background_url) { %><img class="asset-preview" src="<%= settings.hero_background_url %>" alt="Current homepage background" /><label><input type="checkbox" name="clear_hero_background_url" value="1" /> Remove current image</label><% } %>
+                <label>Homepage background</label>
+                <% if (settings.hero_background_url) { %><img class="asset-preview" src="<%= settings.hero_background_url %>" alt="Current homepage background" /><% } %>
               </div>
               <div>
-                <label for="card-background-file">Membership card background</label>
-                <input id="card-background-file" name="card_background_file" type="file" accept="image/jpeg,image/png,image/webp" />
-                <% if (settings.card_background_url) { %><img class="asset-preview" src="<%= settings.card_background_url %>" alt="Current membership card background" /><label><input type="checkbox" name="clear_card_background_url" value="1" /> Remove current image</label><% } %>
+                <label>Membership card background</label>
+                <% if (settings.card_background_url) { %><img class="asset-preview" src="<%= settings.card_background_url %>" alt="Current membership card background" /><% } %>
               </div>
             </div>
 

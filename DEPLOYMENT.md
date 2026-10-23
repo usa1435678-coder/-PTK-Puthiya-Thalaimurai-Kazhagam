@@ -29,15 +29,15 @@ The app will run on `http://localhost:3000`
 
 ### Admin Credentials
 
-On first startup the administrator account is created with the documented password `PTKadmin@2026`, which is also written to `data/admin-credentials.txt`. Keep that file private and persist the `data` directory. Set `INITIAL_ADMIN_PASSWORD` (or `ADMIN_PASSWORD`) before first startup to choose the password for a brand-new database. On the first run against an existing database the account is reset once to the documented default `PTKadmin@2026` so you are never locked out by an unknown password, after which changes made from System settings are preserved. Set `FORCE_ADMIN_RESET=true` once to force the account back to the configured/default password.
+For a new local database, set `INITIAL_ADMIN_PASSWORD` (or legacy `ADMIN_PASSWORD`) before first startup or use the randomly generated password saved to `data/admin-credentials.txt`. Existing administrator passwords are preserved across startup and redeploy. To explicitly reset access, set a new `INITIAL_ADMIN_PASSWORD` (or `ADMIN_PASSWORD`, at least 12 characters) and `FORCE_ADMIN_RESET=true` for one startup, then remove the flag.
 
 ### Database
 - SQLite database stored in `data/ptk.db` by default; set `DB_PATH` to override it
 - Schema is auto-initialized on first run
 - SQLite write-ahead logging and full synchronous commits are enabled for safer durable writes
-- Full SQLite snapshots and copies of uploaded files are created at startup if needed, every 24 hours, and before administrator restore/delete operations. They are never automatically deleted.
+- Full SQLite snapshots and copies of uploaded member-photo files are created at startup if needed, every 24 hours, and before administrator restore/delete operations. They are never automatically deleted.
 - Downloaded snapshots include administrator password hashes; protect them and store an extra copy outside the web service.
-- Full automatic snapshots include all database tables and a copy of uploaded image files. The separate JSON export does not include uploaded binaries; keep the upload directory on the persistent disk so images survive redeploys.
+- Full automatic snapshots include all database tables and a copy of uploaded member-photo files. The separate JSON export does not include uploaded binaries; keep the upload directory on the persistent disk so member photos survive redeploys.
 
 ## Features Implemented
 
@@ -94,22 +94,24 @@ On first startup the administrator account is created with the documented passwo
 
 ### Render (persistent SQLite and uploads)
 
-The repository includes a `render.yaml` Blueprint for a Docker web service with a persistent disk. The disk stores the SQLite database, automatic snapshots, uploaded branding/member images, CSV export, and generated admin credentials so they survive redeploys. A paid Render web service and persistent disk are required; free ephemeral storage is not suitable for this application. The already-running Free service is not made durable just by deploying code or by keeping the Blueprint in the repository.
+The repository includes a `render.yaml` Blueprint for a Docker web service with a persistent disk. The disk stores the SQLite database, automatic snapshots, uploaded member photos, CSV export, and generated admin credentials so they survive redeploys. Branding image uploads are disabled; the app uses bundled PTK assets and preserves existing configured image files and settings. A paid Render web service and persistent disk are required; free ephemeral storage is not suitable for this application. The already-running Free service is not made durable just by deploying code or by keeping the Blueprint in the repository.
 
 1. Ensure the GitHub repository branch you want to deploy contains `render.yaml` and the application changes.
 2. Sign in to Render, choose **New → Blueprint**, connect the GitHub repository, and select that branch.
 3. Review the Blueprint. It creates the `ptk-digital-platform` web service and a 1 GB persistent disk at `/var/data`. Confirm the paid plan and disk before applying.
 4. Wait for the `/healthz` check and deployment to pass. Render assigns the permanent `onrender.com` URL in the service dashboard.
-5. Sign in with username `admin` and password `PTKadmin@2026` (or the `INITIAL_ADMIN_PASSWORD` you set). Change it under System settings after signing in.
+5. Retrieve the generated `INITIAL_ADMIN_PASSWORD` from the Render service Environment page and sign in as `admin`. Existing service accounts are not reset just by deploying; if you need to recover access, use the explicit reset procedure below.
 6. If using a custom domain, add it in the Render service settings and follow Render's DNS/HTTPS instructions.
 
 For an existing service, first take and verify an external backup, then attach a persistent disk in Render service settings and use a mount path of `/var/data`. Set `PERSISTENT_STORAGE_ROOT=/var/data`, `DB_PATH=/var/data/ptk.db`, `BACKUP_DIR=/var/data/backups`, `UPLOAD_DIR=/var/data/uploads`, and `MEMBER_CSV_PATH=/var/data/ptk-members.csv`, then deploy. Production startup is refused unless each path is configured beneath the persistent root and the root is present as an actual mounted filesystem. Do not delete/recreate a service or detach a disk as a way to apply these settings: disk/service recreation can cause data loss.
 
 The admin System settings page supports JSON export/restore and lists the newest automatic full snapshots. A snapshot is made at startup if none exists, at least every 24 hours, and before administrator restore/delete operations; no snapshot is automatically pruned. Each full snapshot contains all database tables, including administrator password hashes, plus a copy of uploaded files. Admins can restore one of these snapshots in the same page; restoration also restores the admin accounts and password from that time, restores missing uploaded files without deleting newer files, and creates a safety snapshot first. The separate JSON export excludes credentials and uploaded binaries. Download full snapshots only over the authenticated admin interface, protect the files, and keep copies in separate durable storage. A backup on the same disk is not protection against losing that disk. Monitor disk capacity because retained snapshots are not automatically deleted.
 
-The supplied PTK logo, flag, leader portrait, and signature are versioned in `public/branding/` and inserted only when the corresponding setting does not yet exist. Startup never fills or overwrites an existing branding setting, including intentionally blank settings. An administrator can explicitly select a bundled image from Branding. An admin replacement updates the database setting and stores the image in `UPLOAD_DIR`; both the settings database and uploads directory therefore need the attached persistent disk for those replacements to survive a deploy.
+The supplied PTK logo, flag, leader portrait, and signature are versioned in `public/branding/` and inserted only when the corresponding setting does not yet exist. Startup never fills or overwrites an existing branding setting, including intentionally blank settings. An administrator can explicitly select a bundled image from Branding, and text/colour changes update the settings database. New branding uploads are disabled. Existing branding image paths and files are left untouched; `UPLOAD_DIR` remains in use for member profile photos, so that directory must stay on the attached persistent disk.
 
-The `SESSION_SECRET` is generated by Render and stored as a service environment variable; `INITIAL_ADMIN_PASSWORD` is set in `render.yaml` (change it, or switch it to `generateValue: true` and read it from the dashboard). The application database, snapshots, and uploads use the persistent disk; keep that disk attached when changing or recreating the service.
+The `SESSION_SECRET` and initial administrator password are generated by Render and stored as service environment variables. Existing service credentials are not changed by this configuration update; rotate any previously exposed password in the Render dashboard and use the reset procedure only when needed. The application database, snapshots, and member uploads use the persistent disk; keep that disk attached when changing or recreating the service.
+
+For an existing database, preserve and back up the attached disk before any recovery. Set a new `INITIAL_ADMIN_PASSWORD` in the Render service Environment settings, set `FORCE_ADMIN_RESET=true`, and restart once. The reset is applied only once per configured password, even if the service restarts; remove `FORCE_ADMIN_RESET` after successful recovery. Do not delete, recreate, detach, or reformat the disk.
 
 ### Option 1: Heroku (Recommended for rapid deployment)
 
@@ -194,7 +196,7 @@ sudo certbot --nginx -d yourdomain.com
 ```bash
 PORT=3000                           # Server port
 SESSION_SECRET="use-at-least-32-random-characters-here" # Stable session signing key
-INITIAL_ADMIN_PASSWORD="set-before-first-start"  # Optional first-run admin password
+INITIAL_ADMIN_PASSWORD="set-before-first-start"  # Initial password / explicit reset password
 NODE_ENV=production                 # production or development
 ```
 
