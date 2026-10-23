@@ -252,6 +252,84 @@ test('admin branding persists in SQLite across restart and production requires m
     const publicPrivacy = await fetch(`${baseUrl}/privacy`);
     assert.match(await publicPrivacy.text(), /Published privacy policy from admin/, 'saved policy should appear publicly');
 
+    const membershipCreate = await fetch(`${baseUrl}/membership`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        full_name: 'Integration Applicant',
+        tamil_name: 'Test Applicant',
+        phone: '55590004',
+        email: 'applicant-integration@example.test',
+        district: 'Chennai',
+        local_unit: 'South',
+        address: '2 Applicant Road, Chennai',
+        membership_category: 'General Member',
+        consent: 'on'
+      })
+    });
+    assert.equal(membershipCreate.status, 200);
+    const application = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id, application_ref FROM membership_applications WHERE phone = ?',
+      ['55590004']
+    );
+    assert(application, 'public membership application should be stored');
+    assert.equal(
+      (await postForm(baseUrl, `/admin/application/${application.id}/edit`, cookie, {
+        full_name: 'Edited Integration Applicant',
+        tamil_name: 'Edited Applicant',
+        phone: '55590004',
+        email: 'applicant-integration@example.test',
+        district: 'Chennai',
+        local_unit: 'North',
+        address: 'Updated Applicant Road, Chennai',
+        membership_category: 'Youth Member'
+      })).status,
+      302,
+      'administrator should be able to edit a pending application'
+    );
+    assert.equal(
+      (await postForm(baseUrl, `/admin/application/${application.id}/status`, cookie, {
+        status: 'approved',
+        note: 'Approved by integration test',
+        return_to: 'members'
+      })).status,
+      302,
+      'administrator should be able to approve an application'
+    );
+    const applicationStatus = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT status FROM membership_applications WHERE id = ?',
+      [application.id]
+    );
+    assert.equal(applicationStatus.status, 'approved');
+    const applicantMember = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT id, member_id, full_name, local_unit, membership_category FROM members WHERE phone = ?',
+      ['55590004']
+    );
+    assert.equal(applicantMember.full_name, 'Edited Integration Applicant');
+    assert.equal(applicantMember.local_unit, 'North');
+    assert.equal(applicantMember.membership_category, 'Youth Member');
+    assert(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM cards WHERE member_id = ?', [applicantMember.id]),
+      'approving an application should issue a member card'
+    );
+    assert.equal(
+      (await postForm(baseUrl, `/admin/members/${applicantMember.id}/edit`, cookie, {
+        full_name: 'Admin Edited Member',
+        tamil_name: 'Admin Edited Tamil Name',
+        phone: '55590004',
+        email: 'applicant-integration@example.test',
+        district: 'Chennai',
+        local_unit: 'West',
+        address: 'Admin Edited Member Road, Chennai',
+        membership_category: 'General Member'
+      })).status,
+      302,
+      'administrator should be able to edit issued member details'
+    );
+
     const announcementCreate = await postForm(baseUrl, '/admin/announcements', cookie, {
       title: 'Persistent public announcement',
       content: 'Announcement content survives restart.',
@@ -467,6 +545,12 @@ test('admin branding persists in SQLite across restart and production requires m
       302
     );
 
+    const backupResponse = await postForm(baseUrl, '/admin/automatic-backups/create', cookie, {});
+    assert.equal(backupResponse.status, 302, 'administrator should be able to create a full database backup');
+    const manualBackups = fs.readdirSync(environment.BACKUP_DIR)
+      .filter(filename => /^ptk-manual-.+\.sqlite$/.test(filename));
+    assert(manualBackups.length > 0, 'manual backup should be saved in configured backup storage');
+
     const publicPage = await fetch(baseUrl);
     const publicHtml = await publicPage.text();
     assert.match(publicHtml, /Persistent Integration Test PTK/, 'public homepage should show saved branding');
@@ -506,11 +590,58 @@ test('admin branding persists in SQLite across restart and production requires m
       'active',
       'member activation should persist after restart'
     );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT full_name, local_unit FROM members WHERE id = ?', [applicantMember.id])).full_name,
+      'Admin Edited Member',
+      'admin-edited membership applicant profile should persist after restart'
+    );
+    assert.equal(
+      (await getDatabaseRow(environment.DB_PATH, 'SELECT status FROM membership_applications WHERE id = ?', [application.id])).status,
+      'approved',
+      'application review status should persist after restart'
+    );
     const restartedImage = await fetch(`${baseUrl}${savedLogo.setting_value}`);
     assert.equal(restartedImage.status, 200, 'branding image should persist and remain served after restart');
     assert.equal(await restartedImage.text(), 'persistent branding image');
     const health = await fetch(`${baseUrl}/healthz`);
     assert.equal(health.status, 200);
+
+    const passwordChange = await postForm(baseUrl, '/admin/settings/password', cookie, {
+      current_password: adminPassword,
+      new_password: 'Updated-Integration-Admin-Password-4831',
+      confirm_password: 'Updated-Integration-Admin-Password-4831'
+    });
+    assert.equal(passwordChange.status, 302, 'administrator password change should save');
+    const newPasswordLogin = await fetch(`${baseUrl}/admin/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: baseUrl
+      },
+      body: new URLSearchParams({
+        username: 'admin',
+        password: 'Updated-Integration-Admin-Password-4831'
+      }),
+      redirect: 'manual'
+    });
+    assert.equal(newPasswordLogin.status, 302, 'updated admin password should authenticate immediately');
+
+    await stopServer(child);
+    child = null;
+    child = await startServer(environment, port);
+    const loginAfterPasswordChange = await fetch(`${baseUrl}/admin/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: baseUrl
+      },
+      body: new URLSearchParams({
+        username: 'admin',
+        password: 'Updated-Integration-Admin-Password-4831'
+      }),
+      redirect: 'manual'
+    });
+    assert.equal(loginAfterPasswordChange.status, 302, 'changed admin password should persist across restart');
 
     const productionEnvironment = {
       ...environment,
