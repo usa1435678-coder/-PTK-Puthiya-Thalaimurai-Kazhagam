@@ -136,6 +136,49 @@ test('admin branding persists in SQLite across restart and production requires m
 
   try {
     child = await startServer(environment, port);
+    for (const [route, values] of [
+      ['/admin/content', { about_text: 'Unauthorized content change' }],
+      ['/admin/announcements', { title: 'Unauthorized announcement', content: 'Should not be saved' }],
+      ['/admin/events', { title: 'Unauthorized event', description: 'Should not be saved', event_date: '2098-01-01' }],
+      ['/admin/members/1/status', { status: 'inactive' }],
+      ['/admin/settings/password', {
+        current_password: adminPassword,
+        new_password: 'Unauthorized-Password-Change-12345',
+        confirm_password: 'Unauthorized-Password-Change-12345'
+      }]
+    ]) {
+      const response = await fetch(`${baseUrl}${route}`, {
+        method: 'POST',
+        headers: {
+          origin: baseUrl,
+          'content-type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams(values),
+        redirect: 'manual'
+      });
+      assert.equal(response.status, 302, `${route} should require an authenticated administrator`);
+      assert.equal(response.headers.get('location'), '/admin/login');
+    }
+    const unauthorizedContent = await getDatabaseRow(
+      environment.DB_PATH,
+      'SELECT setting_value FROM settings WHERE setting_key = ?',
+      ['about_text']
+    );
+    assert.notEqual(
+      unauthorizedContent && unauthorizedContent.setting_value,
+      'Unauthorized content change',
+      'unauthenticated content changes should not be persisted'
+    );
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM announcements WHERE title = ?', ['Unauthorized announcement']),
+      undefined,
+      'unauthenticated announcements should not be persisted'
+    );
+    assert.equal(
+      await getDatabaseRow(environment.DB_PATH, 'SELECT id FROM events WHERE title = ?', ['Unauthorized event']),
+      undefined,
+      'unauthenticated events should not be persisted'
+    );
     const cookie = await login(baseUrl);
 
     const brandingPage = await fetch(`${baseUrl}/admin/branding`, { headers: { cookie } });
